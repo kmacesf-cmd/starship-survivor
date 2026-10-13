@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { ENEMY_TYPES, POOL_SIZES } from '../config/GameConfig';
 import type { EnemyKey } from '../config/GameConfig';
 import { Enemy } from '../entities/Enemy';
+import type { Arena, Point } from '../systems/Arena';
 
 const CELL = 64;
 const BUCKETS = 1024;
@@ -18,6 +19,7 @@ const bucketOf = (cx: number, cy: number): number =>
   (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) & BUCKET_MASK;
 
 export type BurnHandler = (enemy: Enemy, damage: number, time: number) => void;
+const ENEMY_WALL_MARGIN = 24;
 
 export class EnemyPool {
   readonly enemies: Enemy[] = [];
@@ -25,9 +27,13 @@ export class EnemyPool {
   readonly results: Enemy[];
   activeCount = 0;
   onBurn: BurnHandler | null = null;
+  onChill: BurnHandler | null = null;
+  /** Perimeter every bug is confined to (spawns and movement). */
+  arena: Arena | null = null;
   /** Hard difficulty: bugs flank and lead the player's movement. */
   smartAI = false;
 
+  private readonly wallPoint: Point = { x: 0, y: 0 };
   private leadX = 0;
   private leadY = 0;
   private readonly free: Int32Array;
@@ -61,6 +67,11 @@ export class EnemyPool {
       return null;
     }
     const enemy = this.enemies[this.free[--this.freeCount]];
+    if (this.arena) {
+      const c = this.arena.clamp(x, y, ENEMY_WALL_MARGIN, this.wallPoint);
+      x = c.x;
+      y = c.y;
+    }
     enemy.spawn(x, y, ENEMY_TYPES[key], hpMult, speedMult, this.nextUid++);
     this.activeCount++;
     return enemy;
@@ -105,6 +116,13 @@ export class EnemyPool {
           continue;
         }
       }
+      const chill = e.collectChill(time);
+      if (chill > 0 && this.onChill) {
+        this.onChill(e, chill, time);
+        if (!e.active) {
+          continue;
+        }
+      }
       let sx = 0;
       let sy = 0;
       const n = this.queryCircle(e.x, e.y, e.bodyRadius);
@@ -145,6 +163,10 @@ export class EnemyPool {
         }
       }
       e.update(time, delta, aimX, aimY);
+      if (this.arena && !this.arena.contains(e.x, e.y, ENEMY_WALL_MARGIN)) {
+        const c = this.arena.clamp(e.x, e.y, ENEMY_WALL_MARGIN, this.wallPoint);
+        e.setPosition(c.x, c.y);
+      }
     }
   }
 

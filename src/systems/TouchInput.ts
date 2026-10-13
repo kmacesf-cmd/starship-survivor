@@ -7,4 +7,6 @@ export const TouchInput = {
   y: 0,
   /** Set by the dash button; consumed by Player. */
   dashRequested: false,
+  /** Set by the air support button or F key; consumed by GameScene. */
+  airRequested: false,
 };

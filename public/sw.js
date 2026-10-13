@@ -1,6 +1,6 @@
 /* Offline-capable service worker: precaches the app shell and every asset index.html references,
    then serves cache-first and refreshes entries in the background. Bump VERSION to invalidate. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `starship-survivor-${VERSION}`;
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 

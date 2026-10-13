@@ -8,6 +8,8 @@ import type { Player } from '../entities/Player';
 import type { EnemyPool } from '../pools/EnemyPool';
 import type { ProjectilePool } from '../pools/ProjectilePool';
 import type { EffectsSystem } from './EffectsSystem';
+import { Arena } from './Arena';
+import type { Point } from './Arena';
 
 const TAU = Math.PI * 2;
 const HALF_W = GAME_WIDTH / 2;
@@ -60,7 +62,8 @@ export class SquadSystem {
   private smokeIn = 0;
   private headingX = 1;
   private headingY = 0;
-  private arenaRadius = 0;
+  private arena: Arena = new Arena();
+  private readonly scratch: Point = { x: 0, y: 0 };
 
   constructor(
     scene: Phaser.Scene,
@@ -94,6 +97,7 @@ export class SquadSystem {
       projectiles,
       fx,
       mates: this.mates,
+      arena: this.arena,
     };
   }
 
@@ -108,8 +112,9 @@ export class SquadSystem {
     return n;
   }
 
-  configure(arenaRadius: number): void {
-    this.arenaRadius = arenaRadius;
+  configure(arena: Arena): void {
+    this.arena = arena;
+    this.ctx.arena = arena;
   }
 
   getUpgradeLevel(id: SquadUpgradeId): number {
@@ -359,27 +364,24 @@ export class SquadSystem {
 
   private placeBeacon(): void {
     const p = this.player;
+    const arena = this.arena;
+    const minD = SQUAD_CONFIG.beaconMinDistance;
+    const maxD = SQUAD_CONFIG.beaconMaxDistance;
     let x = p.x;
     let y = p.y;
-    if (this.arenaRadius > 0) {
-      const limit = this.arenaRadius - ARENA_EDGE_MARGIN;
-      const minDist = Math.min(SQUAD_CONFIG.beaconMinDistance - 60, limit);
-      for (let attempt = 0; attempt < 16; attempt++) {
-        const a = Math.random() * TAU;
-        const d = Math.sqrt(Math.random()) * limit;
-        x = Math.cos(a) * d;
-        y = Math.sin(a) * d;
-        const dx = x - p.x;
-        const dy = y - p.y;
-        if (dx * dx + dy * dy >= minDist * minDist) {
-          break;
-        }
-      }
-    } else {
+    for (let attempt = 0; attempt < 24; attempt++) {
       const a = Math.random() * TAU;
-      const d = SQUAD_CONFIG.beaconMinDistance + Math.random() * (SQUAD_CONFIG.beaconMaxDistance - SQUAD_CONFIG.beaconMinDistance);
+      const d = minD + Math.random() * (maxD - minD);
       x = p.x + Math.cos(a) * d;
       y = p.y + Math.sin(a) * d;
+      if (arena.contains(x, y, ARENA_EDGE_MARGIN)) {
+        break;
+      }
+      if (attempt === 23) {
+        const c = arena.clamp(x, y, ARENA_EDGE_MARGIN, this.scratch);
+        x = c.x;
+        y = c.y;
+      }
     }
     this.beaconX = x;
     this.beaconY = y;

@@ -4,6 +4,9 @@ import type { EffectsSystem } from '../systems/EffectsSystem';
 import type { EnemyPool } from '../pools/EnemyPool';
 import type { Enemy } from './Enemy';
 import type { ProjectilePool } from '../pools/ProjectilePool';
+import type { Arena, Point } from '../systems/Arena';
+
+const SQUAD_WALL_MARGIN = 28;
 
 const TAU = Math.PI * 2;
 const WALK_KEYS = frameKeys('trooper-walk');
@@ -58,6 +61,7 @@ export interface SquadContext {
   projectiles: ProjectilePool;
   fx: EffectsSystem;
   mates: Squadmate[];
+  arena: Arena;
 }
 
 /**
@@ -75,6 +79,7 @@ export class Squadmate {
   y = 0;
 
   private nextPulseAt = 0;
+  private readonly wall: Point = { x: 0, y: 0 };
 
   private vx = 0;
   private vy = 0;
@@ -224,12 +229,13 @@ export class Squadmate {
     }
     this.x += this.vx * dt;
     this.y += this.vy * dt;
-
+    this.keepInside(c);
     if (distSq > SQUAD_CONFIG.tetherDistance * SQUAD_CONFIG.tetherDistance) {
       this.x = tx;
       this.y = ty;
       this.vx = 0;
       this.vy = 0;
+      this.keepInside(c);
     }
 
     this.hp = Math.min(this.maxHp, this.hp + c.regen * dt);
@@ -255,6 +261,15 @@ export class Squadmate {
     this.nextPulseAt = c.time + PSI_PERIOD_MS;
     c.enemies.stunCircle(this.x, this.y, PSI_RADIUS, c.time, PSI_STUN_MS);
     c.fx.ring(this.x, this.y, 12, PSI_RADIUS, 0.5, 0xb48cff, 5);
+  }
+
+  /** Keeps the trooper inside the perimeter; the scratch point avoids per-frame allocation. */
+  private keepInside(c: SquadContext): void {
+    if (!c.arena.contains(this.x, this.y, SQUAD_WALL_MARGIN)) {
+      const p = c.arena.clamp(this.x, this.y, SQUAD_WALL_MARGIN, this.wall);
+      this.x = p.x;
+      this.y = p.y;
+    }
   }
 
   private combat(c: SquadContext): void {
@@ -355,6 +370,7 @@ export class Squadmate {
     if (d > reach) {
       this.x += (dx / d) * step;
       this.y += (dy / d) * step;
+      this.keepInside(c);
       this.rotation = Phaser.Math.Angle.RotateTo(this.rotation, Math.atan2(dy, dx), 6 * c.dt);
       this.phase = (this.phase + c.dt * TAU * 1.1) % TAU;
     }

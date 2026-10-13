@@ -70,7 +70,7 @@ export class BootScene extends Phaser.Scene {
     this.bakeCombatEffects();
     this.bakeCrawl();
     this.bakePod();
-
+    this.bakePhaseFour();
     this.gfx.destroy();
     this.createAnimations();
     this.scene.start(SCENE_KEYS.MENU);
@@ -826,6 +826,107 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0x3b3f45, 1);
     g.fillCircle(c + 30, c - 34, 3);
     this.bake(TEXTURES.POD, 112, 112);
+  }
+
+  // ---------------------------------------------------------------- phase 4 sprites
+
+  private bakePhaseFour(): void {
+    const g = this.gfx;
+
+    // Plasma orb: layered additive-looking glow, 48px.
+    const pc = 24;
+    for (let r = 24; r > 2; r -= 2) {
+      const t = r / 24;
+      g.fillStyle(t > 0.6 ? 0x2d7bff : t > 0.35 ? 0x5fd0ff : 0xe8fbff, t > 0.6 ? 0.18 : 0.55);
+      g.fillCircle(pc, pc, r);
+    }
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(pc, pc, 5);
+    g.lineStyle(2, 0xbfeaff, 0.9);
+    g.beginPath();
+    g.arc(pc, pc, 12, 0.3, 2.4);
+    g.strokePath();
+    this.bake(TEXTURES.PLASMA, 48, 48);
+
+    // Cluster grenade canister, pointing right.
+    g.fillStyle(0x3d4a2a, 1);
+    g.fillRoundedRect(2, 3, 24, 12, 4);
+    g.fillStyle(0x5b6b3a, 1);
+    g.fillRect(4, 4, 20, 3);
+    g.fillStyle(0xffc400, 1);
+    g.fillRect(9, 3, 3, 12);
+    g.fillRect(17, 3, 3, 12);
+    g.fillStyle(0x2b2e33, 1);
+    g.fillTriangle(26, 4, 26, 14, 33, 9);
+    g.fillStyle(0xd8372f, 1);
+    g.fillCircle(2, 9, 2.5);
+    this.bake(TEXTURES.GRENADE, 34, 18);
+
+    // Bomblet.
+    g.fillStyle(0x2b2e33, 1);
+    g.fillCircle(7, 7, 6);
+    g.fillStyle(0xff9a2a, 1);
+    g.fillCircle(7, 7, 3);
+    g.fillStyle(0xffe680, 1);
+    g.fillCircle(6, 6, 1.4);
+    this.bake(TEXTURES.BOMBLET, 14, 14);
+
+    // Bomb, falling nose-down (nose points right so rotation drives it).
+    g.fillStyle(0x31353b, 1);
+    g.fillRoundedRect(4, 4, 22, 10, 5);
+    g.fillStyle(0x505760, 1);
+    g.fillRect(8, 5, 14, 2);
+    g.fillStyle(0xffc400, 1);
+    g.fillRect(14, 4, 3, 10);
+    g.fillStyle(0x8c1d14, 1);
+    g.fillTriangle(5, 9, 0, 3, 0, 15);
+    g.fillStyle(0xd8372f, 1);
+    g.fillTriangle(24, 5, 24, 13, 30, 9);
+    this.bake(TEXTURES.BOMB, 32, 18);
+
+    // Bomber silhouette seen from above, nose pointing right (dark, flat, with exhaust glow).
+    g.fillStyle(0x000000, 0.28);
+    g.fillEllipse(80, 66, 130, 24);
+    g.fillStyle(0x1d2126, 1);
+    g.fillTriangle(70, 40, 100, 62, 40, 62);
+    g.fillTriangle(70, 92, 100, 70, 40, 70);
+    g.fillStyle(0x2b3138, 1);
+    g.fillRoundedRect(20, 58, 108, 16, 7);
+    g.fillTriangle(128, 58, 128, 74, 150, 66);
+    g.fillStyle(0x3a424b, 1);
+    g.fillRect(40, 60, 70, 3);
+    g.fillStyle(0x1d2126, 1);
+    g.fillTriangle(24, 60, 8, 50, 8, 60);
+    g.fillTriangle(24, 72, 8, 82, 8, 72);
+    g.fillStyle(0x8fd4ff, 0.9);
+    g.fillEllipse(116, 66, 14, 7);
+    g.fillStyle(0xff7a1a, 0.95);
+    g.fillCircle(60, 48, 3.5);
+    g.fillCircle(60, 84, 3.5);
+    g.fillStyle(0xffe680, 1);
+    g.fillCircle(60, 48, 1.6);
+    g.fillCircle(60, 84, 1.6);
+    g.fillStyle(0xd8372f, 1);
+    g.fillRect(26, 61, 8, 2);
+    this.bake(TEXTURES.BOMBER, 152, 132);
+
+    // Perimeter warning sign (faces inward; pointing up toward the arena edge).
+    g.fillStyle(0x15171a, 1);
+    g.fillRect(30, 38, 4, 22);
+    g.fillStyle(0x15171a, 1);
+    g.fillRoundedRect(4, 2, 56, 40, 5);
+    g.fillStyle(0xffc400, 1);
+    g.fillRoundedRect(7, 5, 50, 34, 3);
+    g.fillStyle(0x15171a, 1);
+    g.fillTriangle(32, 9, 20, 31, 44, 31);
+    g.fillStyle(0xffc400, 1);
+    g.fillTriangle(32, 14, 24, 28, 40, 28);
+    g.fillStyle(0x15171a, 1);
+    g.fillRect(31, 18, 2, 6);
+    g.fillRect(31, 26, 2, 2);
+    g.fillStyle(0xd8372f, 1);
+    g.fillRect(9, 33, 46, 4);
+    this.bake(TEXTURES.SIGN, 64, 62);
   }
 
   // ---------------------------------------------------------------- animations

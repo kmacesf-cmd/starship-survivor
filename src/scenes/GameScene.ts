@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+﻿import Phaser from 'phaser';
 import { CHARACTERS, DEFAULT_RUN, DIFFICULTIES, GAME_MODES } from '../config/CharacterConfig';
 import type { CharacterDef, DifficultyDef, GameModeDef, RunSetup } from '../config/CharacterConfig';
 import {
@@ -11,9 +11,9 @@ import {
   TEXTURES,
   frameKey,
 } from '../config/GameConfig';
+import type { WeaponId } from '../config/WeaponsConfig';
 import { Player } from '../entities/Player';
 import type { Enemy } from '../entities/Enemy';
-import type { Projectile } from '../entities/Projectile';
 import { EnemyPool } from '../pools/EnemyPool';
 import { GemPool } from '../pools/GemPool';
 import { ProjectilePool } from '../pools/ProjectilePool';
@@ -27,13 +27,23 @@ import { PassiveManager } from '../systems/PassiveManager';
 import { SpecialsSystem } from '../systems/SpecialsSystem';
 import type { SpecialsHud } from '../systems/SpecialsSystem';
 import { ScoreStore } from '../systems/ScoreStore';
-import { COLOR_NAPALM } from '../systems/CombatHooks';
+import { COLOR_CRYO, COLOR_NAPALM } from '../systems/CombatHooks';
+import { Arena } from '../systems/Arena';
+import { ArenaRenderer } from '../systems/ArenaRenderer';
+import { AirSupportSystem } from '../systems/AirSupportSystem';
+import type { AirSupportHud } from '../systems/AirSupportSystem';
+import { PerkSystem } from '../systems/PerkSystem';
+import { PERK_TUNING } from '../config/PerkConfig';
+import { TouchInput } from '../systems/TouchInput';
+import type { Point } from '../systems/Arena';
+import type { Projectile } from '../entities/Projectile';
+import { ProjectileKind } from '../entities/Projectile';
 import type { CombatHooks } from '../systems/CombatHooks';
 
 export type GameState = 'playing' | 'levelup' | 'paused' | 'over';
 
 /** Plain numbers shared with UIScene; mutated in place every frame. */
-export interface HudState extends SquadHud, SpecialsHud {
+export interface HudState extends SquadHud, SpecialsHud, AirSupportHud {
   hp: number;
   maxHp: number;
   xp: number;
@@ -47,10 +57,6 @@ export interface HudState extends SquadHud, SpecialsHud {
   dashCharge01: number;
   psiCharge01: number;
 }
-
-const ARENA_TEXTURE = 'arena-ring';
-const ARENA_BAND = 14;
-const ARENA_MARGIN = 80;
 
 const BLOOD_KEYS: string[] = [];
 for (let i = 0; i < FRAMES.BLOOD_VARIANTS; i++) {
@@ -68,6 +74,9 @@ const COLOR_PLAYER = 0xff4d4d;
 const COLOR_BLAST = 0xffb347;
 const COLOR_BURN = 0xff7a2a;
 const EXPLOSION_KNOCK = 3;
+const COLOR_CRIT = 0xff5af0;
+const REFLECT_REACH = 34;
+const PLASMA_BLAST_DAMAGE = 1.6;
 const BURN_DURATION_MS = 2200;
 
 export class GameScene extends Phaser.Scene {
@@ -95,6 +104,10 @@ export class GameScene extends Phaser.Scene {
     stimState: -1,
     stimFraction: 0,
     overclockLevel: 0,
+    airVisible: 0,
+    airCharge01: 0,
+    airReady: 0,
+    airRunning: 0,
   };
   state: GameState = 'playing';
   mode: GameModeDef = GAME_MODES[DEFAULT_RUN.mode];
@@ -114,6 +127,12 @@ export class GameScene extends Phaser.Scene {
   squad!: SquadSystem;
   passives!: PassiveManager;
   specials!: SpecialsSystem;
+  perks!: PerkSystem;
+  air!: AirSupportSystem;
+  readonly arena = new Arena();
+  weaponId: WeaponId = 'morita';
+  private arenaRenderer!: ArenaRenderer;
+  private readonly clampPoint: Point = { x: 0, y: 0 };
   private ground!: Phaser.GameObjects.TileSprite;
   private kills = 0;
   private scoreSaved = false;
@@ -140,6 +159,7 @@ export class GameScene extends Phaser.Scene {
     this.mode = GAME_MODES[data?.mode ?? DEFAULT_RUN.mode];
     this.character = CHARACTERS[data?.character ?? DEFAULT_RUN.character];
     this.difficulty = DIFFICULTIES[data?.difficulty ?? DEFAULT_RUN.difficulty];
+    this.weaponId = data?.weapon ?? CHARACTERS[data?.character ?? DEFAULT_RUN.character].startingWeapon;
   }
 
   create(): void {
@@ -154,9 +174,8 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(0);
 
-    if (this.mode.arenaRadius > 0) {
-      this.buildArena(this.mode.arenaRadius);
-    }
+    this.arena.configure(this.mode.arenaRadius, this.mode.arenaHalf);
+    this.arenaRenderer = new ArenaRenderer(this, this.arena);
     this.createEffectPools();
     this.fx = new EffectsSystem(this);
 
@@ -164,6 +183,7 @@ export class GameScene extends Phaser.Scene {
     this.player.fx = this.fx;
     this.player.setCharacter(this.character);
     this.enemies = new EnemyPool(this);
+    this.enemies.arena = this.arena;
     this.projectiles = new ProjectilePool(this);
     this.gems = new GemPool(this);
     this.waves = new WaveManager(this.enemies);
@@ -171,15 +191,18 @@ export class GameScene extends Phaser.Scene {
     this.enemies.smartAI = this.difficulty.smartAI;
     this.weapons = new WeaponManager(this.player, this.enemies, this.projectiles, this.hooks, this.fx);
     this.squad = new SquadSystem(this, this.player, this.enemies, this.projectiles, this.fx);
-    this.squad.configure(this.mode.arenaRadius);
+    this.squad.configure(this.arena);
     this.specials = new SpecialsSystem(this, this.player, this.enemies, this.weapons, this.squad, this.fx, this.hooks);
-    this.upgrades = new UpgradeManager(this.player, this.weapons, this.events, this.specials, this.squad);
+    this.perks = new PerkSystem(this.player, this.gems);
+    this.air = new AirSupportSystem(this, this.player, this.fx, this.hooks, this.perks);
+    this.upgrades = new UpgradeManager(this.player, this.weapons, this.events, this.specials, this.squad, this.perks);
     this.passives = new PassiveManager(this.player, this.enemies, this.fx);
 
     this.projectiles.setHitHandler(this.onProjectileHit);
     this.projectiles.setDetonateHandler(this.onRocketDetonate);
     this.projectiles.setTrailHandler(this.onRocketTrail);
     this.enemies.onBurn = this.onBurn;
+    this.enemies.onChill = this.onChill;
     this.waves.onEvent = this.onWaveEvent;
     this.events.on(EVENTS.CHOOSE_CARD, this.onChooseCard, this);
     this.events.on(EVENTS.RESTART, this.onRestart, this);
@@ -212,8 +235,9 @@ export class GameScene extends Phaser.Scene {
 
     this.fx.begin();
     p.update(time, dt);
-    if (this.mode.arenaRadius > 0) {
-      this.clampToArena(p);
+    this.arena.clamp(p.x, p.y, p.bodyRadius + 10, this.clampPoint);
+    if (this.clampPoint.x !== p.x || this.clampPoint.y !== p.y) {
+      p.setPosition(this.clampPoint.x, this.clampPoint.y);
     }
     this.enemies.update(time, dt, p.x, p.y, p.arcade.velocity.x, p.arcade.velocity.y);
 
@@ -223,6 +247,9 @@ export class GameScene extends Phaser.Scene {
       if (applied > 0) {
         this.spawnDamageText(p.x, p.y - 26, applied, COLOR_PLAYER, 1.2);
         this.cameras.main.shake(90, 0.004);
+        if (p.reflectFraction > 0) {
+          this.reflectDamage(contact * p.reflectFraction, time);
+        }
         if (p.dead) {
           this.endGame(false);
           return;
@@ -234,9 +261,20 @@ export class GameScene extends Phaser.Scene {
     this.squad.update(time, dt);
     this.specials.update(time, dt);
     this.passives.update(time);
+    this.perks.update(time);
+    if (TouchInput.airRequested) {
+      TouchInput.airRequested = false;
+      if (this.airUnlocked()) {
+        this.air.trigger(this.cameras.main, time);
+      }
+    }
+    this.air.update(time, dt);
     this.projectiles.update(time, dt, p.x, p.y, this.enemies);
 
     const xp = this.gems.update(time, dt, p.x, p.y, p.pickupRadiusSq, 560);
+    if (this.gems.collectedCount > 0 && this.airUnlocked()) {
+      this.air.addGems(this.gems.collectedCount);
+    }
     if (xp > 0) {
       const gained = p.addXp(xp);
       if (gained > 0) {
@@ -295,7 +333,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.quiet) {
       this.spawnDamageText(enemy.x, enemy.y - enemy.bodyRadius, amount, color === COLOR_NORMAL && heavy ? COLOR_HEAVY : color, heavy ? 1.15 : 1);
       this.spawnBlood(enemy.x + dirX * 8, enemy.y + dirY * 8, killed ? 1.1 : 0.5);
-      if (color !== COLOR_BURN && color !== COLOR_NAPALM) {
+      if (color !== COLOR_BURN && color !== COLOR_NAPALM && color !== COLOR_CRYO) {
         this.specials.onWeaponHit(enemy.x, enemy.y);
       }
     }
@@ -308,6 +346,7 @@ export class GameScene extends Phaser.Scene {
       }
       this.enemies.release(enemy);
       this.kills++;
+      this.perks.onKill(time);
     }
     return killed;
   }
@@ -336,11 +375,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   private readonly onRocketDetonate = (rocket: Projectile, time: number): void => {
+    if (rocket.kind === ProjectileKind.Grenade) {
+      this.fx.ring(rocket.x, rocket.y, 6, 34, 0.25, 0xffd27a, 3);
+      return;
+    }
+    if (rocket.kind === ProjectileKind.Plasma) {
+      this.fx.ring(rocket.x, rocket.y, rocket.blast * 0.3, rocket.blast, 0.3, 0x7fd0ff, 4);
+      this.explode(rocket.x, rocket.y, rocket.blast, rocket.damage * PLASMA_BLAST_DAMAGE, 1, time, false);
+      return;
+    }
     this.explode(rocket.x, rocket.y, rocket.blast, rocket.damage, 1, time, false);
   };
 
   private readonly onRocketTrail = (rocket: Projectile, _time: number): void => {
-    this.fx.emit(TEXTURES.PIXEL, rocket.x - rocket.dirX * 14, rocket.y - rocket.dirY * 14, -rocket.dirX * 40 + (Math.random() - 0.5) * 30, -rocket.dirY * 40 + (Math.random() - 0.5) * 30, 0.45, 2.2, 0.4, 0.8, 0xffb347, true, 0);
+    const plasma = rocket.kind === ProjectileKind.Plasma;
+    this.fx.emit(TEXTURES.PIXEL, rocket.x - rocket.dirX * 14, rocket.y - rocket.dirY * 14, -rocket.dirX * 40 + (Math.random() - 0.5) * 30, -rocket.dirY * 40 + (Math.random() - 0.5) * 30, 0.45, 2.2, 0.4, 0.8, plasma ? 0x7fd0ff : 0xffb347, true, 0);
   };
 
   private readonly onBurn = (enemy: Enemy, damage: number, time: number): void => {
@@ -350,12 +399,36 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private readonly onChill = (enemy: Enemy, damage: number, time: number): void => {
+    this.damageEnemy(enemy, damage, 0, 0, 0, time, COLOR_CRYO);
+  };
+
   private readonly onProjectileHit = (enemy: Enemy, projectile: Projectile, time: number): void => {
     if (projectile.burnDps > 0) {
       enemy.ignite(time, projectile.burnDps, BURN_DURATION_MS);
     }
+    const crit = this.player.critChance > 0 && Math.random() < this.player.critChance;
+    if (crit) {
+      this.damageEnemy(enemy, projectile.damage * PERK_TUNING.sabot.critMult, projectile.dirX, projectile.dirY, projectile.knockMult, time, COLOR_CRIT);
+      return;
+    }
     this.damageEnemy(enemy, projectile.damage, projectile.dirX, projectile.dirY, projectile.knockMult, time, COLOR_NORMAL);
   };
+
+  /** Ballistic Vest: bugs touching the player take a share of the damage they just dealt. */
+  private reflectDamage(amount: number, time: number): void {
+    const p = this.player;
+    const n = this.enemies.queryCircle(p.x, p.y, p.bodyRadius + REFLECT_REACH);
+    for (let i = 0; i < n; i++) {
+      const e = this.enemies.results[i];
+      if (e.active) {
+        const dx = e.x - p.x;
+        const dy = e.y - p.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        this.damageEnemy(e, amount, dx / len, dy / len, 1, time, COLOR_CRIT);
+      }
+    }
+  }
 
   private readonly onWaveEvent = (event: number): void => {
     this.events.emit(EVENTS.WAVE_ALERT, event);
@@ -393,37 +466,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private buildArena(radius: number): void {
-    if (!this.textures.exists(ARENA_TEXTURE)) {
-      const half = radius + ARENA_MARGIN;
-      const size = half * 2;
-      const g = this.make.graphics({ x: 0, y: 0 }, false);
-      g.lineStyle(ARENA_MARGIN - ARENA_BAND / 2, 0x000000, 0.28);
-      g.beginPath();
-      g.arc(half, half, radius + ARENA_BAND / 2 + (ARENA_MARGIN - ARENA_BAND / 2) / 2, 0, Math.PI * 2);
-      g.strokePath();
-      const segments = 96;
-      for (let i = 0; i < segments; i++) {
-        g.lineStyle(ARENA_BAND, i % 2 === 0 ? 0xffc400 : 0x1b1b1b, 1);
-        g.beginPath();
-        g.arc(half, half, radius, (i / segments) * Math.PI * 2, ((i + 1) / segments) * Math.PI * 2);
-        g.strokePath();
-      }
-      g.generateTexture(ARENA_TEXTURE, size, size);
-      g.destroy();
-    }
-    this.add.image(0, 0, ARENA_TEXTURE).setDepth(3);
-  }
-
-  private clampToArena(p: Player): void {
-    const limit = this.mode.arenaRadius - p.bodyRadius;
-    const d2 = p.x * p.x + p.y * p.y;
-    if (d2 > limit * limit) {
-      const k = limit / Math.sqrt(d2);
-      p.setPosition(p.x * k, p.y * k);
-    }
-  }
-
   private resetRun(): void {
     this.enemies.releaseAll();
     this.projectiles.releaseAll();
@@ -433,7 +475,10 @@ export class GameScene extends Phaser.Scene {
     this.player.reset(0, 0);
     this.fx.reset();
     this.waves.reset();
-    this.weapons.reset(this.character.startingWeapon);
+    this.weapons.reset(this.weaponId);
+    this.perks.reset();
+    this.air.reset();
+    TouchInput.airRequested = false;
     this.upgrades.reset();
     this.squad.reset();
     this.specials.reset();
@@ -498,6 +543,12 @@ export class GameScene extends Phaser.Scene {
     h.psiCharge01 = this.passives.psiCharge01;
     this.squad.writeHud(h as SquadHud);
     this.specials.writeHud(h);
+    this.air.writeHud(h, this.airUnlocked());
+  }
+
+  /** Air support appears once the player owns a Nuke, the Orbital Strike (airstrike) or the Fleet Bomber Run. */
+  airUnlocked(): boolean {
+    return this.specials.getLevel('nuke') > 0 || this.weapons.getLevel('orbital') > 0 || this.perks.bomberLevel > 0;
   }
 
   /** Runs after physics has synced sprites, so the ground and camera always share the same scroll value. */
@@ -509,6 +560,7 @@ export class GameScene extends Phaser.Scene {
     cam.scrollY += (ty - cam.scrollY) * CAMERA_LERP;
     this.ground.tilePositionX = Math.round(cam.scrollX);
     this.ground.tilePositionY = Math.round(cam.scrollY);
+    this.arenaRenderer.draw(cam, this.time.now);
   }
 
   // ---------------------------------------------------------------- effects

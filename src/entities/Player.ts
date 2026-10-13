@@ -41,7 +41,19 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   speedMult = 1;
   pickupMult = 1;
   armor = 0;
-
+  /** Chance (0..1) for a projectile hit to crit for double damage (Sabot Rounds). */
+  critChance = 0;
+  /** Extra pierce granted to bullet weapons (Sabot Rounds). */
+  bonusPierce = 0;
+  /** Added to the pickup-radius multiplier (Bio-Magnetic Vacuum). */
+  magnetBonus = 0;
+  /** Fraction of incoming bug damage removed (Reinforced Ballistic Vest). */
+  damageReduction = 0;
+  /** Fraction of melee damage reflected back at attackers. */
+  reflectFraction = 0;
+  /** Adrenaline Stims multipliers; 1 when no stacks are active. */
+  adrenalineMove = 1;
+  adrenalineFire = 1;
   /** Passive modifiers of the selected character; copied in place so switching characters never allocates. */
   readonly perks: CharacterPerks = { ...DEFAULT_PERKS };
   private baseTint = 0xffffff;
@@ -99,6 +111,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     return Math.floor(XP_CONFIG.base * Math.pow(XP_CONFIG.growth, level - 1)) + XP_CONFIG.flat * (level - 1);
   }
 
+  /** Fire-rate divisor every weapon uses: combat stim and adrenaline combined. */
+  get totalFireRate(): number {
+    return this.fireRateMult * this.adrenalineFire;
+  }
+
   get isInvulnerable(): boolean {
     return this.scene.time.now < this.invulnUntil;
   }
@@ -146,6 +163,13 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.xpToNext = Player.xpForLevel(1);
     this.dead = false;
     this.fireRateMult = 1;
+    this.critChance = 0;
+    this.bonusPierce = 0;
+    this.magnetBonus = 0;
+    this.damageReduction = 0;
+    this.reflectFraction = 0;
+    this.adrenalineMove = 1;
+    this.adrenalineFire = 1;
     this.moveX = 0;
     this.moveY = 0;
     this.aimAngle = 0;
@@ -169,7 +193,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (this.dead || time < this.invulnUntil) {
       return 0;
     }
-    const applied = Math.max(1, rawDamage - this.armor);
+    const applied = Math.max(1, rawDamage * (1 - this.damageReduction) - this.armor);
     this.hp -= applied;
     this.invulnUntil = time + PLAYER_CONFIG.invulnMs;
     this.flashUntil = time + 120;
@@ -242,7 +266,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       }
     }
 
-    const speed = PLAYER_CONFIG.speed * this.speedMult;
+    const speed = PLAYER_CONFIG.speed * this.speedMult * this.adrenalineMove;
     const moving = ix !== 0 || iy !== 0;
     this.moveX = ix;
     this.moveY = iy;

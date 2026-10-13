@@ -1,6 +1,7 @@
-import Phaser from 'phaser';
+﻿import Phaser from 'phaser';
 import { EVENTS, GAME_HEIGHT, GAME_WIDTH, SCENE_KEYS, SQUAD_CAP, TEXTURES } from '../config/GameConfig';
 import { SPECIALS, SPECIAL_IDS, SQUAD_UPGRADES, SQUAD_UPGRADE_IDS } from '../config/SpecialsConfig';
+import { PERKS, PERK_IDS } from '../config/PerkConfig';
 import { TouchInput } from '../systems/TouchInput';
 import { STAT_IDS, STATS, WEAPONS } from '../config/WeaponsConfig';
 import type { WeaponId } from '../config/WeaponsConfig';
@@ -19,6 +20,11 @@ const WEAPON_ICONS: Record<WeaponId, { texture: string; scale: number; tint: num
   flamer: { texture: TEXTURES.FLAME, scale: 1.9, tint: 0xffffff },
   arc: { texture: TEXTURES.FIREBALL, scale: 0.6, tint: 0x7fc8ff },
   orbital: { texture: TEXTURES.FIREBALL, scale: 0.6, tint: 0xff4a3a },
+  plasma: { texture: TEXTURES.PLASMA, scale: 0.9, tint: 0xffffff },
+  smg: { texture: TEXTURES.BULLET, scale: 2.2, tint: 0xffe27a },
+  sniper: { texture: TEXTURES.BULLET, scale: 3.4, tint: 0xfff2c8 },
+  cluster: { texture: TEXTURES.GRENADE, scale: 1.6, tint: 0xffffff },
+  cryo: { texture: TEXTURES.FIREBALL, scale: 0.6, tint: 0x8be9ff },
 };
 
 const FONT = 'Verdana, Arial, sans-serif';
@@ -28,8 +34,8 @@ const CARD_GAP = 40;
 const CARD_Y = GAME_HEIGHT / 2 + 30;
 const CARD_STAGGER_MS = 70;
 const CARD_POP_MS = 320;
-const CARD_COLORS = { weapon: 0x6b3510, stat: 0x10424f, heal: 0x1b501f, special: 0x4a1a5e, squad: 0x33401a } as const;
-const CARD_BORDERS = { weapon: 0xffa23a, stat: 0x58d6ff, heal: 0x6dff7a, special: 0xd68bff, squad: 0xc8f05a } as const;
+const CARD_COLORS = { weapon: 0x6b3510, stat: 0x10424f, heal: 0x1b501f, special: 0x4a1a5e, squad: 0x33401a, perk: 0x5a4a10 } as const;
+const CARD_BORDERS = { weapon: 0xffa23a, stat: 0x58d6ff, heal: 0x6dff7a, special: 0xd68bff, squad: 0xc8f05a, perk: 0xffd34a } as const;
 const HP_BAR_W = 320;
 const HP_BAR_H = 24;
 const PAUSE_BTN_W = 320;
@@ -46,6 +52,15 @@ const DASH_BTN_X = GAME_WIDTH - 140;
 const DASH_BTN_Y = 540;
 const DASH_BTN_R = 56;
 const DASH_HIT_R = 84;
+const AIR_BTN_X = DASH_BTN_X;
+const AIR_BTN_Y = 412;
+const AIR_BTN_R = 46;
+const AIR_HIT_R = 62;
+const RADAR_X = GAME_WIDTH - 96;
+const RADAR_Y = 178;
+const RADAR_R = 78;
+const RADAR_RANGE = 900;
+const RADAR_SCALE = RADAR_R / RADAR_RANGE;
 
 const ALERT_TEXT: string[] = [];
 ALERT_TEXT[WaveEvent.Swarm] = 'BUG SWARM INCOMING!';
@@ -94,6 +109,9 @@ export class UIScene extends Phaser.Scene {
   private stimLabel!: Phaser.GameObjects.Text;
   private overclockLabel!: Phaser.GameObjects.Text;
   private dashButtonLabel!: Phaser.GameObjects.Text;
+  private airLabel!: Phaser.GameObjects.Text;
+  private lastAirText = '';
+  private airPressUntil = 0;
   private touchGfx!: Phaser.GameObjects.Graphics;
   private touchShown = false;
   private stickId = -1;
@@ -177,6 +195,7 @@ export class UIScene extends Phaser.Scene {
       kb.on('keydown-ENTER', () => this.requestRestart());
       kb.on('keydown-SPACE', () => this.requestRestart());
       kb.on('keydown-ESC', () => this.togglePause());
+      kb.on('keydown-F', () => this.requestAir());
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -253,6 +272,7 @@ export class UIScene extends Phaser.Scene {
     this.stimLabel = this.label(0, 0, '', 11, '#ffffff', 3).setOrigin(0, 0.5).setDepth(7).setVisible(false);
     this.overclockLabel = this.label(0, 0, 'SQUAD OVERCLOCK', 12, '#7dffea', 3).setOrigin(1, 0).setDepth(7).setVisible(false);
     this.dashButtonLabel = this.label(DASH_BTN_X, DASH_BTN_Y, 'DASH', 20, '#e8fbff', 4).setOrigin(0.5).setDepth(61).setVisible(false);
+    this.airLabel = this.label(AIR_BTN_X, AIR_BTN_Y, 'AIR SUPPORT', 12, '#fff2c8', 4).setOrigin(0.5).setDepth(62).setVisible(false).setAlign('center');
     this.rescueText = this.label(W / 2, 108, 'HOLD POSITION - RESCUING TROOPER', 15, '#9dff9d', 4)
       .setOrigin(0.5)
       .setDepth(6)
@@ -400,6 +420,8 @@ export class UIScene extends Phaser.Scene {
       this.squadText.setText(`SQUAD ${h.squad}/${SQUAD_CAP}`);
     }
 
+    this.updateRadar(g, h, now);
+    this.updateAirButton(g, h, now);
     this.updateSpecialsHud(g, h);
     this.updateTouch();
 
@@ -505,6 +527,145 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
+  // ---------------------------------------------------------------- radar and air support
+
+  private requestAir(): void {
+    if (this.overlayOpen() || this.gs.hud.airVisible !== 1) {
+      return;
+    }
+    TouchInput.airRequested = true;
+    this.airPressUntil = this.time.now + 160;
+  }
+
+  /** Circular tactical radar. One Graphics pass per frame, no per-blip objects. */
+  private updateRadar(g: Phaser.GameObjects.Graphics, h: HudState, now: number): void {
+    const gs = this.gs;
+    const p = gs.player;
+    g.fillStyle(0x03140a, 0.72);
+    g.fillCircle(RADAR_X, RADAR_Y, RADAR_R + 4);
+    g.lineStyle(2, 0x58e06a, 0.9);
+    g.strokeCircle(RADAR_X, RADAR_Y, RADAR_R + 4);
+    g.lineStyle(1, 0x2e8a40, 0.5);
+    g.strokeCircle(RADAR_X, RADAR_Y, RADAR_R * 0.5);
+    g.lineBetween(RADAR_X - RADAR_R, RADAR_Y, RADAR_X + RADAR_R, RADAR_Y);
+    g.lineBetween(RADAR_X, RADAR_Y - RADAR_R, RADAR_X, RADAR_Y + RADAR_R);
+    const sweep = now * 0.003;
+    g.lineStyle(2, 0x58e06a, 0.45);
+    g.lineBetween(RADAR_X, RADAR_Y, RADAR_X + Math.cos(sweep) * RADAR_R, RADAR_Y + Math.sin(sweep) * RADAR_R);
+
+    const limit = (RADAR_R - 2) * (RADAR_R - 2);
+    const gems = gs.gems.gems;
+    g.fillStyle(0x39ff14, 0.9);
+    for (let i = 0; i < gems.length; i++) {
+      const gem = gems[i];
+      if (!gem.active) {
+        continue;
+      }
+      const dx = (gem.x - p.x) * RADAR_SCALE;
+      const dy = (gem.y - p.y) * RADAR_SCALE;
+      if (dx * dx + dy * dy <= limit) {
+        g.fillRect(RADAR_X + dx - 1, RADAR_Y + dy - 1, 2, 2);
+      }
+    }
+    const enemies = gs.enemies.enemies;
+    g.fillStyle(0xff3b30, 1);
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
+      if (!e.active) {
+        continue;
+      }
+      const dx = (e.x - p.x) * RADAR_SCALE;
+      const dy = (e.y - p.y) * RADAR_SCALE;
+      if (dx * dx + dy * dy <= limit) {
+        g.fillRect(RADAR_X + dx - 1.5, RADAR_Y + dy - 1.5, 3, 3);
+      }
+    }
+    const mates = gs.squad.mates;
+    g.fillStyle(0x3de8ff, 1);
+    for (let i = 0; i < mates.length; i++) {
+      const m = mates[i];
+      if (!m.isOccupied) {
+        continue;
+      }
+      const dx = (m.x - p.x) * RADAR_SCALE;
+      const dy = (m.y - p.y) * RADAR_SCALE;
+      if (dx * dx + dy * dy <= limit) {
+        g.fillCircle(RADAR_X + dx, RADAR_Y + dy, 3);
+      }
+    }
+    if (h.beaconActive === 1) {
+      let bx = (gs.squad.beaconX - p.x) * RADAR_SCALE;
+      let by = (gs.squad.beaconY - p.y) * RADAR_SCALE;
+      const d2 = bx * bx + by * by;
+      const pulse = 0.6 + 0.4 * Math.sin(now * 0.01);
+      if (d2 > limit) {
+        const len = Math.sqrt(d2);
+        const ux = bx / len;
+        const uy = by / len;
+        bx = ux * (RADAR_R - 6);
+        by = uy * (RADAR_R - 6);
+        g.fillStyle(0xffe14a, pulse);
+        g.fillTriangle(
+          RADAR_X + bx + ux * 8,
+          RADAR_Y + by + uy * 8,
+          RADAR_X + bx - ux * 4 - uy * 6,
+          RADAR_Y + by - uy * 4 + ux * 6,
+          RADAR_X + bx - ux * 4 + uy * 6,
+          RADAR_Y + by - uy * 4 - ux * 6,
+        );
+      } else {
+        g.lineStyle(2, 0xffe14a, pulse);
+        g.strokeCircle(RADAR_X + bx, RADAR_Y + by, 4 + 5 * (1 - pulse));
+        g.fillStyle(0xffe14a, 1);
+        g.fillCircle(RADAR_X + bx, RADAR_Y + by, 3);
+      }
+    }
+    g.fillStyle(0x3d8bff, 1);
+    g.fillCircle(RADAR_X, RADAR_Y, 4);
+    g.lineStyle(1, 0xffffff, 0.9);
+    g.strokeCircle(RADAR_X, RADAR_Y, 4);
+  }
+
+  /** AIR SUPPORT ability button above Dash; only drawn once an air support power-up is owned. */
+  private updateAirButton(g: Phaser.GameObjects.Graphics, h: HudState, now: number): void {
+    if (h.airVisible !== 1) {
+      this.airLabel.setVisible(false);
+      return;
+    }
+    const ready = h.airReady === 1;
+    const pulse = ready ? 0.5 + 0.5 * Math.sin(now * 0.012) : 0;
+    const pressed = now < this.airPressUntil;
+    g.fillStyle(0x000000, 0.55);
+    g.fillCircle(AIR_BTN_X, AIR_BTN_Y, AIR_BTN_R + 4);
+    g.fillStyle(ready ? 0xffb020 : 0x3a2a08, ready ? 0.5 + 0.3 * pulse : 0.85);
+    g.fillCircle(AIR_BTN_X, AIR_BTN_Y, AIR_BTN_R);
+    if (!ready) {
+      g.lineStyle(7, 0xffb020, 1);
+      g.beginPath();
+      g.arc(AIR_BTN_X, AIR_BTN_Y, AIR_BTN_R - 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * h.airCharge01, false);
+      g.strokePath();
+    }
+    if (ready) {
+      g.lineStyle(3 + 4 * pulse, 0xffe9a0, 0.5 + 0.5 * pulse);
+      g.strokeCircle(AIR_BTN_X, AIR_BTN_Y, AIR_BTN_R + 3 + 4 * pulse);
+    }
+    g.lineStyle(3, pressed ? 0xffffff : 0xffd27a, 0.9);
+    g.strokeCircle(AIR_BTN_X, AIR_BTN_Y, AIR_BTN_R);
+    let text: string;
+    if (h.airRunning === 1) {
+      text = 'AIR SUPPORT\nINBOUND';
+    } else if (ready) {
+      text = TouchInput.active ? 'AIR SUPPORT\nREADY' : 'AIR SUPPORT\nREADY [F]';
+    } else {
+      text = 'AIR SUPPORT\n' + Math.floor(h.airCharge01 * 100) + '%';
+    }
+    if (text !== this.lastAirText) {
+      this.lastAirText = text;
+      this.airLabel.setText(text);
+    }
+    this.airLabel.setVisible(true).setAlpha(ready || h.airRunning === 1 ? 1 : 0.85);
+  }
+
   // ---------------------------------------------------------------- touch controls
 
   private buildTouch(): void {
@@ -544,6 +705,14 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onTouchDown(pointer: Phaser.Input.Pointer): void {
+    if (!this.overlayOpen() && this.gs.hud.airVisible === 1) {
+      const ax = pointer.x - AIR_BTN_X;
+      const ay = pointer.y - AIR_BTN_Y;
+      if (ax * ax + ay * ay <= AIR_HIT_R * AIR_HIT_R) {
+        this.requestAir();
+        return;
+      }
+    }
     if (!pointer.wasTouch) {
       return;
     }
@@ -721,6 +890,8 @@ export class UIScene extends Phaser.Scene {
           view.icon.setTint(0xd68bff);
         } else if (card.kind === 'squad') {
           view.icon.setTint(0xe6ff7a);
+        } else if (card.kind === 'perk') {
+          view.icon.setTint(0xffd34a);
         } else {
           view.icon.clearTint();
         }
@@ -896,6 +1067,13 @@ export class UIScene extends Phaser.Scene {
       if (level > 0) {
         any = true;
         perks += ` > ${SQUAD_UPGRADES[SQUAD_UPGRADE_IDS[i]].name} Lv ${level}\n`;
+      }
+    }
+    for (let i = 0; i < PERK_IDS.length; i++) {
+      const level = gs.perks.getLevel(PERK_IDS[i]);
+      if (level > 0) {
+        any = true;
+        perks += ' > ' + PERKS[PERK_IDS[i]].name + ' Lv ' + level + '\n';
       }
     }
     if (!any) {

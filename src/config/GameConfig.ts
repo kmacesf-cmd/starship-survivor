@@ -36,6 +36,12 @@ export const TEXTURES = {
   PELLET: 'pellet',
   POD: 'drop-pod',
   CRAWL: 'trooper-crawl',
+  PLASMA: 'plasma-orb',
+  GRENADE: 'grenade',
+  BOMBLET: 'bomblet',
+  BOMBER: 'bomber',
+  BOMB: 'bomb',
+  SIGN: 'warning-sign',
 } as const;
 
 export const ANIMS = {
@@ -177,6 +183,28 @@ export const DASH_CONFIG = {
   speed: 780,
   rechargeMs: 3200,
   graceMs: 80,
+} as const;
+
+/** Air support ability: charged by collecting XP gems and fired from the HUD button or the F key. */
+export const AIR_SUPPORT = {
+  /** Percent of the meter (0..100) added per bio-crystal collected. */
+  chargePerGem: 4,
+  bombers: 3,
+  /** Horizontal gap between bombers in the echelon, and how far each trails the leader. */
+  echelonX: 170,
+  echelonY: 150,
+  speed: 780,
+  /** Distance in px, either side of the player, the formation spans. */
+  halfSpan: 900,
+  bombsPerBomber: 9,
+  bombDamage: 110,
+  bombRadius: 120,
+  fallMs: 420,
+  maxBombs: 48,
+  /** Bombs added per Fleet Bomber Run level beyond the base (every second level). */
+  fleetBombRadiusPerLevel: 0.06,
+  fleetDamagePerLevel: 0.12,
+  fleetChargePerLevel: 0.15,
 } as const;
 
 export const PSI_CONFIG = {

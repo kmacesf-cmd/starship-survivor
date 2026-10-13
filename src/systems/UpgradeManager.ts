@@ -1,10 +1,13 @@
-import Phaser from 'phaser';
+﻿import Phaser from 'phaser';
 import { EVENTS } from '../config/GameConfig';
 import { SPECIALS, SPECIAL_IDS, SPECIAL_TUNING, SQUAD_UPGRADES, SQUAD_UPGRADE_IDS } from '../config/SpecialsConfig';
 import type { SpecialId, SquadUpgradeId } from '../config/SpecialsConfig';
 import { COUNT_LABELS, STAT_IDS, STATS, WEAPONS, WEAPON_IDS } from '../config/WeaponsConfig';
 import type { StatId, WeaponId } from '../config/WeaponsConfig';
+import { PERKS, PERK_IDS } from '../config/PerkConfig';
+import type { PerkId } from '../config/PerkConfig';
 import type { Player } from '../entities/Player';
+import type { PerkSystem } from './PerkSystem';
 import type { SpecialsSystem } from './SpecialsSystem';
 import type { SquadSystem } from './SquadSystem';
 import type { WeaponManager } from './WeaponManager';
@@ -13,7 +16,7 @@ export const CARD_COUNT = 3;
 const HEAL_FRACTION = 0.3;
 const SPECIAL_MIN_LEVEL = 3;
 
-export type CardKind = 'weapon' | 'stat' | 'heal' | 'special' | 'squad';
+export type CardKind = 'weapon' | 'stat' | 'heal' | 'special' | 'squad' | 'perk';
 
 export interface UpgradeCard {
   kind: CardKind;
@@ -32,7 +35,7 @@ interface Candidate {
 }
 
 const HEAL_ID = 'field-rations';
-const MAX_CANDIDATES = WEAPON_IDS.length + STAT_IDS.length + SPECIAL_IDS.length + SQUAD_UPGRADE_IDS.length + 1;
+const MAX_CANDIDATES = WEAPON_IDS.length + STAT_IDS.length + SPECIAL_IDS.length + SQUAD_UPGRADE_IDS.length + PERK_IDS.length + 1;
 
 export class UpgradeManager {
   /** Cards for the current choice; only the first `cardCount` entries are valid. */
@@ -57,6 +60,7 @@ export class UpgradeManager {
     private readonly events: Phaser.Events.EventEmitter,
     private readonly specials: SpecialsSystem,
     private readonly squad: SquadSystem,
+    private readonly perks: PerkSystem,
   ) {
     for (let i = 0; i < CARD_COUNT; i++) {
       this.cards.push({ kind: 'heal', id: '', title: '', description: '', tag: '', level: 0, isNew: false });
@@ -98,6 +102,7 @@ export class UpgradeManager {
       return false;
     }
     this.pending--;
+    this.perks.onLevelUp();
     this.buildCards();
     this.choosing = true;
     this.events.emit(EVENTS.LEVEL_UP, this.cards, this.cardCount, this.player.level);
@@ -133,6 +138,9 @@ export class UpgradeManager {
       this.specials.raise(card.id as SpecialId);
     } else if (card.kind === 'squad') {
       this.squad.raiseUpgrade(card.id as SquadUpgradeId);
+    } else if (card.kind === 'perk') {
+      this.perks.raise(card.id as PerkId);
+      this.applyStats();
     } else {
       this.player.heal(Math.ceil(this.player.maxHp * HEAL_FRACTION));
     }
@@ -144,7 +152,7 @@ export class UpgradeManager {
     p.damageMult = 1 + STATS.might.perLevel * this.statLevels.might;
     p.cooldownMult = Math.max(0.3, 1 - STATS.cooldown.perLevel * this.statLevels.cooldown);
     p.speedMult = p.perks.speedMult * (1 + STATS.speed.perLevel * this.statLevels.speed);
-    p.pickupMult = p.perks.magnetMult * (1 + STATS.magnet.perLevel * this.statLevels.magnet);
+    p.pickupMult = p.perks.magnetMult * (1 + p.magnetBonus + STATS.magnet.perLevel * this.statLevels.magnet);
     p.armor = p.perks.armorFlat + STATS.armor.perLevel * this.statLevels.armor;
     this.weapons.syncDrones();
   }
@@ -183,6 +191,13 @@ export class UpgradeManager {
         if (this.squad.getUpgradeLevel(id) < SQUAD_UPGRADES[id].maxLevel) {
           this.setCandidate(n++, 'squad', id, 1.8);
         }
+      }
+    }
+    for (let i = 0; i < PERK_IDS.length; i++) {
+      const id = PERK_IDS[i];
+      const level = this.perks.getLevel(id);
+      if (level < PERKS[id].maxLevel) {
+        this.setCandidate(n++, 'perk', id, level === 0 ? 1.6 : 2);
       }
     }
     // Healing is always offered at low weight so a maxed build still gets a full set of cards.
@@ -268,6 +283,15 @@ export class UpgradeManager {
       card.isNew = current === 0;
       card.level = current + 1;
       card.tag = `SQUAD LV ${current + 1}/${def.maxLevel}`;
+      card.description = def.description;
+    } else if (c.kind === 'perk') {
+      const id = c.id as PerkId;
+      const def = PERKS[id];
+      const current = this.perks.getLevel(id);
+      card.title = def.name;
+      card.isNew = current === 0;
+      card.level = current + 1;
+      card.tag = card.isNew ? 'NEW PERK' : `PERK LV ${current + 1}/${def.maxLevel}`;
       card.description = def.description;
     } else {
       card.title = 'Field Rations';

@@ -59,6 +59,8 @@ export class Gem extends Phaser.GameObjects.Image {
 export class GemPool {
   readonly gems: Gem[] = [];
   activeCount = 0;
+  /** Gems picked up during the most recent update call. */
+  collectedCount = 0;
 
   private readonly free: Int32Array;
   private freeCount: number;
@@ -120,6 +122,7 @@ export class GemPool {
   update(time: number, delta: number, px: number, py: number, pickupRadiusSq: number, maxChaseSpeed: number): number {
     const dt = Math.min(delta, MAX_STEP_MS) * 0.001;
     let collected = 0;
+    this.collectedCount = 0;
     const gems = this.gems;
     for (let i = 0; i < gems.length; i++) {
       const g = gems[i];
@@ -132,6 +135,7 @@ export class GemPool {
 
       if (d2 <= COLLECT_RADIUS_SQ) {
         collected += g.value;
+        this.collectedCount++;
         this.release(g);
         continue;
       }

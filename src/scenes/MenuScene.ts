@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+﻿import Phaser from 'phaser';
 import {
   CHARACTERS,
   CHARACTER_IDS,
@@ -9,6 +9,8 @@ import {
   GAME_MODE_IDS,
 } from '../config/CharacterConfig';
 import type { CharacterId, DifficultyId, GameModeId, RunSetup } from '../config/CharacterConfig';
+import { STARTER_WEAPONS } from '../config/WeaponsConfig';
+import type { WeaponId } from '../config/WeaponsConfig';
 import { GAME_HEIGHT, GAME_WIDTH, SCENE_KEYS, frameKey } from '../config/GameConfig';
 import { ScoreStore } from '../systems/ScoreStore';
 
@@ -23,6 +25,7 @@ const PORTRAIT_KEY = frameKey('trooper-idle', 0);
 const REGISTRY_MODE = 'menu-mode';
 const REGISTRY_CHARACTER = 'menu-character';
 const REGISTRY_DIFFICULTY = 'menu-difficulty';
+const REGISTRY_WEAPON = 'menu-weapon';
 const SCORE_ROWS = 10;
 const DIFF_X = 500;
 const DIFF_W = 120;
@@ -37,13 +40,19 @@ const MODE_GAP = 14;
 const CARD_X = 450;
 const CARD_Y = 150;
 const CARD_W = 150;
-const CARD_H = 170;
+const CARD_H = 120;
 const CARD_GAP = 15;
 
 const BIO_X = 450;
-const BIO_Y = 340;
+const BIO_Y = 282;
 const BIO_W = CARD_W * 5 + CARD_GAP * 4;
-const BIO_H = 230;
+const BIO_H = 150;
+
+const WEAPON_Y = 456;
+const WEAPON_W = 155;
+const WEAPON_H = 58;
+const WEAPON_GAP_X = 8.75;
+const WEAPON_GAP_Y = 6;
 
 interface ModeView {
   bg: Phaser.GameObjects.Rectangle;
@@ -60,6 +69,12 @@ interface CardView {
   baseY: number;
 }
 
+interface WeaponView {
+  bg: Phaser.GameObjects.Rectangle;
+  name: Phaser.GameObjects.Text;
+  blurb: Phaser.GameObjects.Text;
+}
+
 interface DiffView {
   bg: Phaser.GameObjects.Rectangle;
   name: Phaser.GameObjects.Text;
@@ -70,12 +85,15 @@ export class MenuScene extends Phaser.Scene {
   private modeId: GameModeId = DEFAULT_RUN.mode;
   private characterId: CharacterId = DEFAULT_RUN.character;
   private difficultyId: DifficultyId = DEFAULT_RUN.difficulty;
+  private weaponId: WeaponId = 'morita';
   private deploying = false;
   private scoresOpen = false;
 
   private readonly modeViews: ModeView[] = [];
   private readonly cardViews: CardView[] = [];
   private readonly diffViews: DiffView[] = [];
+  private readonly weaponViews: WeaponView[] = [];
+  private weaponHeader!: Phaser.GameObjects.Text;
   private readonly scoreRows: Phaser.GameObjects.Text[] = [];
   private scoreLayer: Phaser.GameObjects.GameObject[] = [];
 
@@ -101,17 +119,21 @@ export class MenuScene extends Phaser.Scene {
     this.modeViews.length = 0;
     this.cardViews.length = 0;
     this.diffViews.length = 0;
+    this.weaponViews.length = 0;
     this.scoreRows.length = 0;
     this.scoreLayer = [];
     this.modeId = (this.registry.get(REGISTRY_MODE) as GameModeId | undefined) ?? DEFAULT_RUN.mode;
     this.characterId = (this.registry.get(REGISTRY_CHARACTER) as CharacterId | undefined) ?? DEFAULT_RUN.character;
     this.difficultyId = (this.registry.get(REGISTRY_DIFFICULTY) as DifficultyId | undefined) ?? DEFAULT_RUN.difficulty;
 
+    this.weaponId = (this.registry.get(REGISTRY_WEAPON) as WeaponId | undefined) ?? CHARACTERS[this.characterId].startingWeapon;
+
     this.buildBackdrop();
     this.buildHeader();
     this.buildModes();
     this.buildCharacters();
     this.buildBio();
+    this.buildWeapons();
     this.buildFooter();
     this.buildScores();
     this.bindKeys();
@@ -199,13 +221,13 @@ export class MenuScene extends Phaser.Scene {
       const def = CHARACTERS[id];
       const x = CARD_X + i * (CARD_W + CARD_GAP);
       const bg = this.add.rectangle(x, CARD_Y, CARD_W, CARD_H, PANEL, 1).setOrigin(0, 0).setStrokeStyle(2, 0x1f5a36, 1);
-      const baseY = CARD_Y + 76;
-      const portrait = this.add.image(x + CARD_W / 2, baseY, PORTRAIT_KEY).setScale(1.25);
+      const baseY = CARD_Y + 48;
+      const portrait = this.add.image(x + CARD_W / 2, baseY, PORTRAIT_KEY).setScale(0.9);
       if (def.tint !== 0xffffff) {
         portrait.setTint(def.tint);
       }
       const parts = def.name.split(' ');
-      const name = this.label(x + CARD_W / 2, CARD_Y + CARD_H - 40, `${parts[0]}\n${parts.slice(1).join(' ')}`, 14, '#d8ffe3')
+      const name = this.label(x + CARD_W / 2, CARD_Y + CARD_H - 38, `${parts[0]}\n${parts.slice(1).join(' ')}`, 13, '#d8ffe3')
         .setOrigin(0.5, 0)
         .setAlign('center');
       this.label(x + 8, CARD_Y + 6, `${i + 1}`, 14, DIM_GREEN);
@@ -224,23 +246,40 @@ export class MenuScene extends Phaser.Scene {
   private buildBio(): void {
     this.add.rectangle(BIO_X, BIO_Y, BIO_W, BIO_H, PANEL, 1).setOrigin(0, 0).setStrokeStyle(2, 0x2fe06a, 1);
     this.bioFrame = this.add.rectangle(BIO_X + 20, BIO_Y + 20, 170, BIO_H - 40, 0x050c08, 1).setOrigin(0, 0).setStrokeStyle(2, 0x1f5a36, 1);
-    this.bioPortrait = this.add.image(BIO_X + 105, BIO_Y + BIO_H / 2, PORTRAIT_KEY).setScale(1.9);
+    this.bioPortrait = this.add.image(BIO_X + 105, BIO_Y + BIO_H / 2, PORTRAIT_KEY).setScale(1.3);
 
     const tx = BIO_X + 215;
-    this.bioName = this.label(tx, BIO_Y + 16, '', 26, '#d8ffe3');
-    this.bioRole = this.label(tx, BIO_Y + 50, '', 15, AMBER);
-    this.bioText = this.label(tx, BIO_Y + 78, '', 14, '#a9d9b8').setWordWrapWidth(BIO_W - 235);
-    this.bioPassives = this.label(tx, BIO_Y + 130, '', 15, '#b7ffc9').setWordWrapWidth(BIO_W - 235).setLineSpacing(4);
-    this.bioLoadout = this.label(tx, BIO_Y + BIO_H - 36, '', 15, AMBER);
+    this.bioName = this.label(tx, BIO_Y + 10, '', 24, '#d8ffe3');
+    this.bioRole = this.label(tx + 230, BIO_Y + 16, '', 14, AMBER);
+    this.bioText = this.label(tx, BIO_Y + 46, '', 13, '#a9d9b8').setWordWrapWidth(BIO_W - 235);
+    this.bioPassives = this.label(tx, BIO_Y + 90, '', 13, '#b7ffc9').setWordWrapWidth(BIO_W - 235).setLineSpacing(3);
+    this.bioLoadout = this.label(tx + 330, BIO_Y + 16, '', 13, AMBER).setVisible(false);
+  }
+
+  private buildWeapons(): void {
+    this.weaponHeader = this.label(BIO_X, WEAPON_Y - 22, '', 14, AMBER);
+    for (let i = 0; i < STARTER_WEAPONS.length; i++) {
+      const def = STARTER_WEAPONS[i];
+      const col = i % 5;
+      const row = (i / 5) | 0;
+      const x = BIO_X + col * (WEAPON_W + WEAPON_GAP_X);
+      const y = WEAPON_Y + row * (WEAPON_H + WEAPON_GAP_Y);
+      const bg = this.add.rectangle(x, y, WEAPON_W, WEAPON_H, PANEL, 1).setOrigin(0, 0).setStrokeStyle(2, 0x1f5a36, 1);
+      const name = this.label(x + 8, y + 6, def.name, 12, '#d8ffe3').setWordWrapWidth(WEAPON_W - 14);
+      const blurb = this.label(x + 8, y + 36, def.blurb, 10, '#8fc9a0').setWordWrapWidth(WEAPON_W - 14);
+      bg.setInteractive({ useHandCursor: true });
+      bg.on('pointerdown', () => this.selectWeapon(def.id));
+      this.weaponViews.push({ bg, name, blurb });
+    }
   }
 
   private buildFooter(): void {
     const y = GAME_HEIGHT - 128;
     this.add.rectangle(0, y, GAME_WIDTH, 3, 0x2fe06a, 1).setOrigin(0, 0);
-    this.summary = this.label(40, y + 14, '', 16, GREEN).setLineSpacing(6);
-    this.label(40, GAME_HEIGHT - 24, '1-3 MISSION  Q/E DIFFICULTY  LEFT/RIGHT OPERATIVE  H SCORES  ENTER DEPLOY', 13, DIM_GREEN);
+    this.summary = this.label(40, y + 10, '', 14, GREEN).setLineSpacing(2);
+    this.label(40, GAME_HEIGHT - 24, '1-3 MISSION  Q/E DIFFICULTY  Z/X WEAPON  LEFT/RIGHT OPERATIVE  H SCORES  ENTER DEPLOY', 13, DIM_GREEN);
 
-    this.label(DIFF_X, y + 4, '[ 03 ] DIFFICULTY', 13, AMBER);
+    this.label(DIFF_X, y + 4, '[ 04 ] DIFFICULTY', 13, AMBER);
     for (let i = 0; i < DIFFICULTY_IDS.length; i++) {
       const id = DIFFICULTY_IDS[i];
       const def = DIFFICULTIES[id];
@@ -341,6 +380,8 @@ export class MenuScene extends Phaser.Scene {
     kb.on('keydown-ONE', () => this.selectMode(GAME_MODE_IDS[0]));
     kb.on('keydown-TWO', () => this.selectMode(GAME_MODE_IDS[1]));
     kb.on('keydown-THREE', () => this.selectMode(GAME_MODE_IDS[2]));
+    kb.on('keydown-Z', () => this.stepWeapon(-1));
+    kb.on('keydown-X', () => this.stepWeapon(1));
     kb.on('keydown-Q', () => this.stepDifficulty(-1));
     kb.on('keydown-E', () => this.stepDifficulty(1));
     kb.on('keydown-H', () => this.toggleScores(!this.scoresOpen));
@@ -364,7 +405,27 @@ export class MenuScene extends Phaser.Scene {
   private selectCharacter(id: CharacterId): void {
     this.characterId = id;
     this.registry.set(REGISTRY_CHARACTER, id);
+    this.selectWeapon(CHARACTERS[id].startingWeapon, false);
     this.refresh();
+  }
+
+  private selectWeapon(id: WeaponId, redraw = true): void {
+    this.weaponId = id;
+    this.registry.set(REGISTRY_WEAPON, id);
+    if (redraw) {
+      this.refresh();
+    }
+  }
+
+  private stepWeapon(dir: number): void {
+    let index = 0;
+    for (let i = 0; i < STARTER_WEAPONS.length; i++) {
+      if (STARTER_WEAPONS[i].id === this.weaponId) {
+        index = i;
+      }
+    }
+    const n = STARTER_WEAPONS.length;
+    this.selectWeapon(STARTER_WEAPONS[(index + dir + n) % n].id);
   }
 
   private stepCharacter(dir: number): void {
@@ -389,7 +450,7 @@ export class MenuScene extends Phaser.Scene {
       return;
     }
     this.deploying = true;
-    const setup: RunSetup = { mode: this.modeId, character: this.characterId, difficulty: this.difficultyId };
+    const setup: RunSetup = { mode: this.modeId, character: this.characterId, difficulty: this.difficultyId, weapon: this.weaponId };
     this.deployText.setText('DEPLOYING...');
     this.cameras.main.fadeOut(280, 0, 0, 0);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
@@ -422,6 +483,17 @@ export class MenuScene extends Phaser.Scene {
       view.name.setColor(selected ? '#ffffff' : '#7fb08e');
     }
 
+    let weaponName = '';
+    for (let i = 0; i < STARTER_WEAPONS.length; i++) {
+      const view = this.weaponViews[i];
+      const selected = STARTER_WEAPONS[i].id === this.weaponId;
+      view.bg.setFillStyle(selected ? 0x4a3a10 : PANEL, 1).setStrokeStyle(selected ? 3 : 2, selected ? 0xffd34a : 0x1f5a36, 1);
+      view.name.setColor(selected ? '#ffffff' : '#9fd8ae');
+      if (selected) {
+        weaponName = STARTER_WEAPONS[i].name;
+      }
+    }
+
     const c = CHARACTERS[this.characterId];
     const m = GAME_MODES[this.modeId];
     const d = DIFFICULTIES[this.difficultyId];
@@ -437,7 +509,8 @@ export class MenuScene extends Phaser.Scene {
     this.bioText.setText(c.bio);
     this.bioPassives.setText(`PASSIVES\n${c.passives.map((p) => `> ${p}`).join('\n')}`);
     this.bioLoadout.setText(`STARTING WEAPON: ${c.loadoutName.toUpperCase()}`);
-    this.summary.setText(`MISSION   : ${m.name.toUpperCase()}\nOPERATIVE : ${c.name.toUpperCase()}\nTHREAT    : ${d.name.toUpperCase()} - ${d.description}`);
+    this.weaponHeader.setText(`[ 03 ] STARTING WEAPON  (${c.name.toUpperCase()} default: ${c.loadoutName})`);
+    this.summary.setText(`MISSION   : ${m.name.toUpperCase()}\nOPERATIVE : ${c.name.toUpperCase()}\nWEAPON    : ${weaponName.toUpperCase()}\nTHREAT    : ${d.name.toUpperCase()} - ${d.description}`);
     this.summary.setWordWrapWidth(DIFF_X - 60);
   }
 }

@@ -10,6 +10,10 @@ export type RocketHandler = (projectile: Projectile, time: number) => void;
 
 const ROCKET_RETARGET_MS = 120;
 const ROCKET_SEEK_RANGE = 520;
+const CLUSTER_SPLIT = 4;
+const BOMBLET_SPEED = 230;
+const BOMBLET_RANGE_MIN = 70;
+const BOMBLET_RANGE_VAR = 70;
 
 export class ProjectilePool {
   readonly projectiles: Projectile[] = [];
@@ -93,6 +97,30 @@ export class ProjectilePool {
     return p;
   }
 
+  firePlasma(x: number, y: number, angle: number, speed: number, damage: number, range: number, blastRadius: number): Projectile | null {
+    const p = this.acquire();
+    if (p) {
+      p.firePlasma(x, y, angle, speed, damage, range, blastRadius);
+    }
+    return p;
+  }
+
+  fireGrenade(x: number, y: number, angle: number, speed: number, bombletDamage: number, range: number, bombletBlast: number): Projectile | null {
+    const p = this.acquire();
+    if (p) {
+      p.fireGrenade(x, y, angle, speed, bombletDamage, range, bombletBlast);
+    }
+    return p;
+  }
+
+  fireBomblet(x: number, y: number, angle: number, speed: number, damage: number, range: number, blastRadius: number): Projectile | null {
+    const p = this.acquire();
+    if (p) {
+      p.fireBomblet(x, y, angle, speed, damage, range, blastRadius);
+    }
+    return p;
+  }
+
   fireOrbit(
     startAngle: number,
     radius: number,
@@ -130,26 +158,28 @@ export class ProjectilePool {
         continue;
       }
       const isRocket = p.kind === ProjectileKind.Rocket;
+      const kind = p.kind;
+      const explosive = kind === ProjectileKind.Rocket || kind === ProjectileKind.Plasma || kind === ProjectileKind.Grenade || kind === ProjectileKind.Bomblet;
       if (isRocket) {
         this.steerRocket(p, time, delta * 0.001, enemies);
       }
       if (!p.update(time, delta, ownerX, ownerY)) {
-        if (isRocket) {
+        if (explosive) {
           this.detonate(p, time);
         }
         this.release(p);
         continue;
       }
-      if (isRocket && this.onTrail) {
+      if ((isRocket || kind === ProjectileKind.Plasma || kind === ProjectileKind.Grenade) && this.onTrail) {
         this.onTrail(p, time);
       }
       const onHit = this.onHit;
-      if (!onHit) {
+      if (!onHit || kind === ProjectileKind.Grenade) {
         continue;
       }
 
       const n = enemies.queryCircle(p.x, p.y, p.radius);
-      if (isRocket) {
+      if (isRocket || kind === ProjectileKind.Bomblet) {
         if (n > 0) {
           this.detonate(p, time);
           this.release(p);
@@ -185,6 +215,13 @@ export class ProjectilePool {
   }
 
   private detonate(p: Projectile, time: number): void {
+    if (p.kind === ProjectileKind.Grenade) {
+      const base = Math.random() * Math.PI * 2;
+      for (let i = 0; i < CLUSTER_SPLIT; i++) {
+        const a = base + (i / CLUSTER_SPLIT) * Math.PI * 2;
+        this.fireBomblet(p.x, p.y, a, BOMBLET_SPEED, p.damage, BOMBLET_RANGE_MIN + Math.random() * BOMBLET_RANGE_VAR, p.blast);
+      }
+    }
     if (this.onDetonate) {
       this.onDetonate(p, time);
     }

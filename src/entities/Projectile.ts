@@ -1,4 +1,4 @@
-import Phaser from 'phaser';
+﻿import Phaser from 'phaser';
 import { TEXTURES } from '../config/GameConfig';
 import type { Enemy } from './Enemy';
 
@@ -7,9 +7,12 @@ export enum ProjectileKind {
   Orbit = 1,
   Rocket = 2,
   Flame = 3,
+  Plasma = 4,
+  Grenade = 5,
+  Bomblet = 6,
 }
 
-const HIT_MEMORY = 16;
+const HIT_MEMORY = 32;
 const TAU = Math.PI * 2;
 const ROCKET_TURN_RATE = 3.6;
 const FLAME_LIFE_GROWTH = 18;
@@ -131,6 +134,55 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
     this.arcade.setVelocity(this.dirX * speed, this.dirY * speed);
   }
 
+  /** Plasma orb: slow, pierces everything and bursts in a wide blast when it burns out. */
+  firePlasma(x: number, y: number, angle: number, speed: number, damage: number, range: number, blastRadius: number): void {
+    this.begin(x, y, ProjectileKind.Plasma, TEXTURES.PLASMA, 9);
+    this.setBlendMode(Phaser.BlendModes.ADD);
+    this.setRotation(angle);
+    this.radius = 22;
+    this.arcade.setCircle(16, this.width / 2 - 16, this.height / 2 - 16);
+    this.dirX = Math.cos(angle);
+    this.dirY = Math.sin(angle);
+    this.speed = speed;
+    this.damage = damage;
+    this.pierce = 999;
+    this.range = range;
+    this.blast = blastRadius;
+    this.arcade.setVelocity(this.dirX * speed, this.dirY * speed);
+  }
+
+  /** Lofted canister. It flies over bugs; at the end of its arc the pool splits it into bomblets that use `damage` and `blastRadius`. */
+  fireGrenade(x: number, y: number, angle: number, speed: number, bombletDamage: number, range: number, bombletBlast: number): void {
+    this.begin(x, y, ProjectileKind.Grenade, TEXTURES.GRENADE, 10);
+    this.setRotation(angle);
+    this.radius = 0;
+    this.arcade.setCircle(3, this.width / 2 - 3, this.height / 2 - 3);
+    this.dirX = Math.cos(angle);
+    this.dirY = Math.sin(angle);
+    this.speed = speed;
+    this.damage = bombletDamage;
+    this.pierce = 0;
+    this.range = range;
+    this.blast = bombletBlast;
+    this.arcade.setVelocity(this.dirX * speed, this.dirY * speed);
+  }
+
+  /** Cluster sub-munition: short scatter flight, detonates on contact or at the end of its flight. */
+  fireBomblet(x: number, y: number, angle: number, speed: number, damage: number, range: number, blastRadius: number): void {
+    this.begin(x, y, ProjectileKind.Bomblet, TEXTURES.BOMBLET, 9);
+    this.setRotation(angle);
+    this.radius = 8;
+    this.arcade.setCircle(4, this.width / 2 - 4, this.height / 2 - 4);
+    this.dirX = Math.cos(angle);
+    this.dirY = Math.sin(angle);
+    this.speed = speed;
+    this.damage = damage;
+    this.pierce = 0;
+    this.range = range;
+    this.blast = blastRadius;
+    this.arcade.setVelocity(this.dirX * speed, this.dirY * speed);
+  }
+
   fireOrbit(startAngle: number, radius: number, angularSpeed: number, damage: number, hitIntervalMs: number): void {
     this.begin(0, 0, ProjectileKind.Orbit, TEXTURES.DRONE, 9);
     this.radius = 15;
@@ -218,6 +270,15 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
       this.rotation += 5 * dt;
     } else if (this.kind === ProjectileKind.Rocket) {
       this.setScale(1 + 0.05 * Math.sin(time * 0.06));
+    } else if (this.kind === ProjectileKind.Plasma) {
+      this.setScale(1 + 0.12 * Math.sin(time * 0.02 + this.poolIndex));
+      this.rotation += 7 * dt;
+    } else if (this.kind === ProjectileKind.Grenade) {
+      const t = Math.min(1, this.travelled / this.range);
+      this.setScale(0.85 + 0.9 * Math.sin(Math.PI * t));
+      this.rotation += 9 * dt;
+    } else if (this.kind === ProjectileKind.Bomblet) {
+      this.rotation += 12 * dt;
     } else {
       this.setScale(1 + 0.15 * Math.sin(time * 0.05 + this.poolIndex), 1);
     }

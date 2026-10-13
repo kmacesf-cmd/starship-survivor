@@ -16,6 +16,7 @@ const TINT_NONE = 0;
 const TINT_FLASH = 1;
 const TINT_STUN = 2;
 const TINT_BURN = 3;
+const TINT_CHILL = 4;
 
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
   readonly arcade: Phaser.Physics.Arcade.Body;
@@ -36,6 +37,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   burnUntil = 0;
   burnDps = 0;
   burnTickAt = 0;
+  chillUntil = 0;
+  chillSlow = 1;
+  chillDps = 0;
+  chillTickAt = 0;
 
   private frames: string[] = FRAME_KEYS.warrior;
   private currentKey = '';
@@ -87,6 +92,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.burnUntil = 0;
     this.burnDps = 0;
     this.burnTickAt = 0;
+    this.chillUntil = 0;
+    this.chillSlow = 1;
+    this.chillDps = 0;
+    this.chillTickAt = 0;
     this.phase = (uid * 1.713) % TAU;
   }
 
@@ -114,6 +123,29 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       this.burnDps = dps;
     }
     this.burnUntil = time + durationMs;
+  }
+
+  isChilled(time: number): boolean {
+    return time < this.chillUntil;
+  }
+
+  /** Freezes the bug's crawl: movement is multiplied by `slow` and frost deals `dps` until it wears off. */
+  chill(time: number, durationMs: number, slow: number, dps: number): void {
+    if (time >= this.chillUntil) {
+      this.chillTickAt = time + BURN_TICK_MS;
+    }
+    this.chillSlow = slow;
+    this.chillDps = dps;
+    this.chillUntil = time + durationMs;
+  }
+
+  /** Frost damage due this frame (0 between ticks). */
+  collectChill(time: number): number {
+    if (time >= this.chillUntil || time < this.chillTickAt) {
+      return 0;
+    }
+    this.chillTickAt = time + BURN_TICK_MS;
+    return this.chillDps * (BURN_TICK_MS * 0.001);
   }
 
   /** Returns the burn damage due this frame (0 between ticks). The caller applies it and handles death. */
@@ -146,10 +178,11 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     const stunned = time < this.stunUntil;
 
     // Legs drive the pace: the scuttle surges forward on each stroke of the gait cycle.
-    const gaitHz = stunned ? 0 : this.speed * 0.035;
+    const slow = time < this.chillUntil ? this.chillSlow : 1;
+    const gaitHz = stunned ? 0 : this.speed * slow * 0.035;
     this.phase = (this.phase + dt * TAU * gaitHz) % TAU;
     const pace = stunned ? 0 : 0.8 + 0.3 * Math.sin(this.phase * 2);
-    const speed = this.speed * pace;
+    const speed = this.speed * slow * pace;
 
     const sepX = Phaser.Math.Clamp(this.sepX, -SEPARATION_MAX, SEPARATION_MAX);
     const sepY = Phaser.Math.Clamp(this.sepY, -SEPARATION_MAX, SEPARATION_MAX);
@@ -173,6 +206,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       want = TINT_FLASH;
     } else if (stunned) {
       want = TINT_STUN;
+    } else if (time < this.chillUntil) {
+      want = TINT_CHILL;
     } else if (time < this.burnUntil) {
       want = TINT_BURN;
     }
@@ -182,6 +217,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
         this.setTintFill(0xffffff);
       } else if (want === TINT_STUN) {
         this.setTint(0x8fb4ff);
+      } else if (want === TINT_CHILL) {
+        this.setTint(0x8be9ff);
       } else if (want === TINT_BURN) {
         this.setTint(0xff9a4a);
       } else {

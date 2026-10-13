@@ -7,7 +7,12 @@ export type WeaponId =
   | 'rocket'
   | 'flamer'
   | 'arc'
-  | 'orbital';
+  | 'orbital'
+  | 'plasma'
+  | 'smg'
+  | 'sniper'
+  | 'cluster'
+  | 'cryo';
 export type StatId = 'might' | 'cooldown' | 'speed' | 'magnet' | 'health' | 'armor';
 
 export interface WeaponLevelStats {
@@ -72,6 +77,11 @@ const L = (
  *  flamer: one puff batch per cooldown, range = flame reach, spread = arc width, burn = burn DPS, pierce unlimited
  *  arc: count = chain targets, range = first-target reach, area = chain jump distance
  *  orbital: count = simultaneous strikes, speed = call-in delay ms, range = targeting reach, area = blast radius
+ *  plasma: slow orb, pierce unlimited, area = blast radius when it burns out at max range, damage = hit damage
+ *  smg: count = barrels, spread = radians of random spray, extreme fire rate
+ *  sniper: fast rail round with unlimited pierce, range = reach
+ *  cluster: lofted canister that bursts into `count` bomblets at range end; area = bomblet blast radius
+ *  cryo: instant beam to range; count = beams, area = beam half-width, burn = frost DPS, knock unused (slow is fixed)
  */
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   morita: {
@@ -183,9 +193,87 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
       L(300, 12000, 2, 1300, 0, 750, 0, { area: 360, knock: 2 }),
     ],
   },
+  plasma: {
+    id: 'plasma',
+    name: 'Heavy Plasma Cannon',
+    description: 'Slow superheated orbs that pierce the swarm and burst in a wide plasma blast.',
+    levels: [
+      L(26, 2000, 1, 190, 999, 520, 0, { area: 110 }),
+      L(32, 1850, 1, 200, 999, 540, 0, { area: 120 }),
+      L(38, 1750, 1, 205, 999, 560, 0.2, { area: 130 }),
+      L(46, 1600, 2, 210, 999, 580, 0.25, { area: 140 }),
+      L(56, 1450, 2, 220, 999, 600, 0.3, { area: 155 }),
+    ],
+  },
+  smg: {
+    id: 'smg',
+    name: 'Twin Micro-SMGs',
+    description: 'Extreme rate of fire in a loose bullet spray.',
+    levels: [
+      L(4, 120, 2, 640, 0, 430, 0.3),
+      L(5, 110, 2, 650, 0, 440, 0.3),
+      L(5, 105, 3, 660, 0, 450, 0.32),
+      L(6, 95, 3, 670, 1, 460, 0.32),
+      L(7, 85, 4, 680, 1, 470, 0.34),
+    ],
+  },
+  sniper: {
+    id: 'sniper',
+    name: 'Anti-Bug Sniper',
+    description: 'Long-range rail shot that punches through infinite lines of bugs.',
+    levels: [
+      L(70, 1900, 1, 1500, 999, 1100, 0),
+      L(85, 1750, 1, 1550, 999, 1150, 0),
+      L(100, 1650, 1, 1600, 999, 1200, 0),
+      L(120, 1500, 2, 1650, 999, 1250, 0.06),
+      L(145, 1350, 2, 1700, 999, 1300, 0.06),
+    ],
+  },
+  cluster: {
+    id: 'cluster',
+    name: 'Cluster Grenade Launcher',
+    description: 'Lofted canister that splits into 4 sub-munitions over the swarm.',
+    levels: [
+      L(24, 2300, 1, 340, 0, 480, 0, { area: 62 }),
+      L(28, 2150, 1, 350, 0, 500, 0, { area: 68 }),
+      L(32, 2000, 1, 360, 0, 520, 0, { area: 74 }),
+      L(38, 1850, 2, 370, 0, 540, 0.3, { area: 80 }),
+      L(46, 1700, 2, 380, 0, 560, 0.3, { area: 88 }),
+    ],
+  },
+  cryo: {
+    id: 'cryo',
+    name: 'Cryo-Freeze Ray',
+    description: 'Freezing beam that slows crawling bugs by 60% and chills them with damage over time.',
+    levels: [
+      L(5, 450, 1, 0, 999, 340, 0, { area: 26, burn: 8 }),
+      L(6, 420, 1, 0, 999, 360, 0, { area: 28, burn: 10 }),
+      L(7, 400, 2, 0, 999, 380, 0.25, { area: 30, burn: 12 }),
+      L(8, 370, 2, 0, 999, 400, 0.25, { area: 32, burn: 15 }),
+      L(10, 340, 3, 0, 999, 420, 0.3, { area: 34, burn: 18 }),
+    ],
+  },
 };
 
 export const MAX_LEVEL = 10;
+
+/** Frost applied by the Cryo-Freeze Ray: movement multiplier (0.4 = 60% slower) and lingering time. */
+export const CRYO_SLOW = 0.4;
+export const CRYO_DURATION_MS = 1800;
+
+/** The ten weapons offered in the menu loadout drawer. */
+export const STARTER_WEAPONS: { id: WeaponId; name: string; blurb: string }[] = [
+  { id: 'morita', name: 'Morita Mark I Rifle', blurb: 'Balanced rapid fire' },
+  { id: 'dualshotgun', name: 'Tactical Dual Shotgun', blurb: 'Cone spread + knockback' },
+  { id: 'rocket', name: 'Mini-Rocket Launcher', blurb: 'Explosive area damage' },
+  { id: 'flamer', name: 'Heavy Flamethrower', blurb: 'Penetrating flame cone' },
+  { id: 'arc', name: 'Shock Arc Caster', blurb: 'Chaining electricity' },
+  { id: 'plasma', name: 'Heavy Plasma Cannon', blurb: 'Piercing plasma orb + AoE' },
+  { id: 'smg', name: 'Twin Micro-SMGs', blurb: 'Extreme fire rate spray' },
+  { id: 'sniper', name: 'Anti-Bug Sniper', blurb: 'Rail shot pierces all' },
+  { id: 'cluster', name: 'Cluster Grenades', blurb: 'Splits into 4 bomblets' },
+  { id: 'cryo', name: 'Cryo-Freeze Ray', blurb: 'Slows bugs by 60% + DoT' },
+];
 
 /** Weapons that gain an extra projectile at levels 8 and 10. */
 const COUNT_GROWTH: Partial<Record<WeaponId, number>> = {
@@ -196,6 +284,9 @@ const COUNT_GROWTH: Partial<Record<WeaponId, number>> = {
   dualshotgun: 1,
   rocket: 1,
   flamer: 1,
+  smg: 1,
+  cluster: 1,
+  cryo: 1,
 };
 
 const COOLDOWN_FLOOR: Record<WeaponId, number> = {
@@ -208,6 +299,11 @@ const COOLDOWN_FLOOR: Record<WeaponId, number> = {
   flamer: 70,
   arc: 450,
   orbital: 9000,
+  plasma: 900,
+  smg: 45,
+  sniper: 800,
+  cluster: 1000,
+  cryo: 200,
 };
 
 /** Extends every weapon's authored levels up to MAX_LEVEL with scaled damage, cooldown, area and burn. */
@@ -246,6 +342,11 @@ export const COUNT_LABELS: Record<WeaponId, string> = {
   flamer: 'Streams',
   arc: 'Chain targets',
   orbital: 'Strikes',
+  plasma: 'Orbs',
+  smg: 'Barrels',
+  sniper: 'Rails',
+  cluster: 'Canisters',
+  cryo: 'Beams',
 };
 
 export const WEAPON_IDS: WeaponId[] = [
@@ -258,6 +359,11 @@ export const WEAPON_IDS: WeaponId[] = [
   'flamer',
   'arc',
   'orbital',
+  'plasma',
+  'smg',
+  'sniper',
+  'cluster',
+  'cryo',
 ];
 export const MAX_WEAPONS = 4;
 

@@ -1,21 +1,26 @@
-import { MAX_WEAPONS, WEAPONS } from '../config/WeaponsConfig';
+import { CRYO_DURATION_MS, CRYO_SLOW, MAX_WEAPONS, WEAPONS } from '../config/WeaponsConfig';
 import { TEXTURES } from '../config/GameConfig';
 import type { WeaponId, WeaponLevelStats } from '../config/WeaponsConfig';
 import type { Player } from '../entities/Player';
 import type { Projectile } from '../entities/Projectile';
 import type { EnemyPool } from '../pools/EnemyPool';
 import type { ProjectilePool } from '../pools/ProjectilePool';
+import { COLOR_CRYO } from './CombatHooks';
 import type { CombatHooks } from './CombatHooks';
 import type { EffectsSystem } from './EffectsSystem';
 
+const PLASMA_ACQUIRE = 460;
+const CLUSTER_MIN_LOB = 140;
+
 const TAU = Math.PI * 2;
 const MAX_DRONES = 8;
-const MIN_COOLDOWN_MS = 80;
+const MIN_COOLDOWN_MS = 40;
 const RETRY_MS = 100;
 const BARREL_OFFSET = 5;
 const ROCKET_ACQUIRE_RANGE = 560;
 const ARC_STUN_MS = 250;
 const COLOR_ARC = 0x9fd8ff;
+const CRYO_LIFE = 0.16;
 const MAX_STRIKES = 6;
 
 interface WeaponSlot {
@@ -72,7 +77,7 @@ export class WeaponManager {
     let dps = 0;
     for (let i = 0; i < this.slotCount; i++) {
       const s = this.statsOf(this.slots[i]);
-      const cooldown = Math.max(MIN_COOLDOWN_MS, (s.cooldownMs * this.player.cooldownMult) / this.player.fireRateMult);
+      const cooldown = Math.max(MIN_COOLDOWN_MS, (s.cooldownMs * this.player.cooldownMult) / this.player.totalFireRate);
       dps += (s.damage * this.player.damageMult * s.count * 1000) / cooldown;
     }
     return dps;
@@ -134,7 +139,7 @@ export class WeaponManager {
     }
     const stats = this.statsOf(this.slots[i]);
     const damage = stats.damage * this.player.damageMult;
-    const interval = Math.max(MIN_COOLDOWN_MS, (stats.cooldownMs * this.player.cooldownMult) / this.player.fireRateMult);
+    const interval = Math.max(MIN_COOLDOWN_MS, (stats.cooldownMs * this.player.cooldownMult) / this.player.totalFireRate);
     const wanted = Math.min(MAX_DRONES, stats.count);
     const base = this.drones[0] ? this.drones[0].getOrbitAngle() : 0;
 
@@ -170,7 +175,7 @@ export class WeaponManager {
       }
       const stats = this.statsOf(slot);
       const fired = this.fire(slot.id, stats, time);
-      const cooldown = Math.max(MIN_COOLDOWN_MS, (stats.cooldownMs * this.player.cooldownMult) / this.player.fireRateMult);
+      const cooldown = Math.max(MIN_COOLDOWN_MS, (stats.cooldownMs * this.player.cooldownMult) / this.player.totalFireRate);
       slot.nextFireAt = time + (fired ? cooldown : RETRY_MS);
     }
   }
@@ -206,9 +211,165 @@ export class WeaponManager {
         return this.fireArc(s, time);
       case 'orbital':
         return this.callOrbital(s, time);
+      case 'plasma':
+        return this.firePlasma(s, time);
+      case 'smg':
+        return this.fireSmg(s, time);
+      case 'sniper':
+        return this.fireSniper(s, time);
+      case 'cluster':
+        return this.fireCluster(s, time);
+      case 'cryo':
+        return this.fireCryo(s, time);
       default:
         return false;
     }
+  }
+
+  private firePlasma(s: WeaponLevelStats, time: number): boolean {
+    const p = this.player;
+    const target = this.enemies.findNearest(p.x, p.y, PLASMA_ACQUIRE * PLASMA_ACQUIRE);
+    if (!target) {
+      return false;
+    }
+    p.getMuzzle(this.muzzle);
+    const aim = Math.atan2(target.y - this.muzzle.y, target.x - this.muzzle.x);
+    p.notifyFired(time, aim);
+    const damage = s.damage * p.damageMult;
+    const blast = s.area * p.perks.explosionRadiusMult;
+    for (let i = 0; i < s.count; i++) {
+      const t = s.count === 1 ? 0 : i - (s.count - 1) / 2;
+      this.projectiles.firePlasma(this.muzzle.x, this.muzzle.y, aim + t * s.spread, s.speed, damage, s.range, blast);
+    }
+    this.fx.ring(this.muzzle.x, this.muzzle.y, 4, 30, 0.2, 0x7fd0ff, 3);
+    return true;
+  }
+
+  private fireSmg(s: WeaponLevelStats, time: number): boolean {
+    const p = this.player;
+    const target = this.enemies.findNearest(p.x, p.y, s.range * s.range);
+    if (!target) {
+      return false;
+    }
+    p.getMuzzle(this.muzzle);
+    const aim = Math.atan2(target.y - this.muzzle.y, target.x - this.muzzle.x);
+    p.notifyFired(time, aim);
+    const sideX = -Math.sin(aim);
+    const sideY = Math.cos(aim);
+    const damage = s.damage * p.damageMult;
+    const pierce = s.pierce + p.bonusPierce;
+    for (let i = 0; i < s.count; i++) {
+      const barrel = (i % 2 === 0 ? 1 : -1) * (BARREL_OFFSET + 2 * (i >> 1));
+      this.projectiles.fireBullet(
+        this.muzzle.x + sideX * barrel,
+        this.muzzle.y + sideY * barrel,
+        aim + (Math.random() - 0.5) * s.spread,
+        s.speed * (0.92 + Math.random() * 0.16),
+        damage,
+        pierce,
+        s.range * (0.9 + Math.random() * 0.15),
+      );
+    }
+    if (Math.random() < 0.5) {
+      this.emberBurst(this.muzzle.x, this.muzzle.y, aim, 1);
+    }
+    return true;
+  }
+
+  /** Rail round: fast, unlimited pierce, with an instant tracer line along the shot. */
+  private fireSniper(s: WeaponLevelStats, time: number): boolean {
+    const p = this.player;
+    const target = this.enemies.findNearest(p.x, p.y, s.range * s.range);
+    if (!target) {
+      return false;
+    }
+    p.getMuzzle(this.muzzle);
+    const aim = Math.atan2(target.y - this.muzzle.y, target.x - this.muzzle.x);
+    p.notifyFired(time, aim);
+    const damage = s.damage * p.damageMult;
+    for (let i = 0; i < s.count; i++) {
+      const t = s.count === 1 ? 0 : i - (s.count - 1) / 2;
+      const angle = aim + t * s.spread;
+      this.projectiles.fireBullet(this.muzzle.x, this.muzzle.y, angle, s.speed, damage, s.pierce, s.range, TEXTURES.BULLET);
+      const ex = this.muzzle.x + Math.cos(angle) * s.range;
+      const ey = this.muzzle.y + Math.sin(angle) * s.range;
+      this.fx.bolt(this.muzzle.x, this.muzzle.y, ex, ey, 0.12, 0xfff2c8, 3);
+    }
+    this.fx.ring(this.muzzle.x, this.muzzle.y, 4, 26, 0.12, 0xffffff, 3);
+    this.emberBurst(this.muzzle.x, this.muzzle.y, aim, 4);
+    return true;
+  }
+
+  /** Lobs canisters toward the thickest swarm; each lands at the target distance and splits into four bomblets. */
+  private fireCluster(s: WeaponLevelStats, time: number): boolean {
+    const p = this.player;
+    const target = this.enemies.findDensest(p.x, p.y, s.range * s.range, 6, 90) ?? this.enemies.findNearest(p.x, p.y, s.range * s.range);
+    if (!target) {
+      return false;
+    }
+    p.getMuzzle(this.muzzle);
+    const dx = target.x - this.muzzle.x;
+    const dy = target.y - this.muzzle.y;
+    const aim = Math.atan2(dy, dx);
+    const dist = Math.min(s.range, Math.max(CLUSTER_MIN_LOB, Math.sqrt(dx * dx + dy * dy)));
+    p.notifyFired(time, aim);
+    const damage = s.damage * p.damageMult;
+    const blast = s.area * p.perks.explosionRadiusMult;
+    for (let i = 0; i < s.count; i++) {
+      const t = s.count === 1 ? 0 : i - (s.count - 1) / 2;
+      this.projectiles.fireGrenade(this.muzzle.x, this.muzzle.y, aim + t * s.spread * 0.5, s.speed, damage, dist * (0.9 + Math.random() * 0.2), blast);
+    }
+    this.emberBurst(this.muzzle.x, this.muzzle.y, aim, 3);
+    return true;
+  }
+
+  /** Instant freezing beam. Every bug within `area` of the beam line is chilled (-60% speed) and damaged. */
+  private fireCryo(s: WeaponLevelStats, time: number): boolean {
+    const p = this.player;
+    const target = this.enemies.findNearest(p.x, p.y, s.range * s.range);
+    if (!target) {
+      return false;
+    }
+    p.getMuzzle(this.muzzle);
+    const aim = Math.atan2(target.y - this.muzzle.y, target.x - this.muzzle.x);
+    p.notifyFired(time, aim);
+    const damage = s.damage * p.damageMult;
+    const frost = s.burn * p.damageMult;
+    const list = this.enemies.enemies;
+    for (let b = 0; b < s.count; b++) {
+      const t = s.count === 1 ? 0 : b - (s.count - 1) / 2;
+      const angle = aim + t * s.spread;
+      const ux = Math.cos(angle);
+      const uy = Math.sin(angle);
+      const ex = this.muzzle.x + ux * s.range;
+      const ey = this.muzzle.y + uy * s.range;
+      this.fx.bolt(this.muzzle.x, this.muzzle.y, ex, ey, CRYO_LIFE, 0xbff4ff, s.area * 0.18);
+      this.fx.bolt(this.muzzle.x, this.muzzle.y, ex, ey, CRYO_LIFE, 0x4fb8ff, s.area * 0.4);
+      for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        if (!e.active) {
+          continue;
+        }
+        const rx = e.x - this.muzzle.x;
+        const ry = e.y - this.muzzle.y;
+        const along = rx * ux + ry * uy;
+        if (along < 0 || along > s.range) {
+          continue;
+        }
+        const px = rx - ux * along;
+        const py = ry - uy * along;
+        const reach = s.area + e.bodyRadius;
+        if (px * px + py * py > reach * reach) {
+          continue;
+        }
+        e.chill(time, CRYO_DURATION_MS, CRYO_SLOW, frost);
+        this.hooks.damageEnemy(e, damage, ux, uy, 0.15, time, COLOR_CRYO);
+        if (Math.random() < 0.4) {
+          this.fx.emit(TEXTURES.PIXEL, e.x, e.y, (Math.random() - 0.5) * 80, (Math.random() - 0.5) * 80, 0.4, 2.4, 0.3, 0.9, 0xcff6ff, true, 0);
+        }
+      }
+    }
+    return true;
   }
 
   private fireDualShotgun(s: WeaponLevelStats, time: number): boolean {
@@ -234,7 +395,7 @@ export class WeaponManager {
         angle,
         s.speed * (0.9 + Math.random() * 0.2),
         damage,
-        s.pierce,
+        s.pierce + p.bonusPierce,
         s.range * (0.85 + Math.random() * 0.15),
         TEXTURES.PELLET,
       );
@@ -441,7 +602,7 @@ export class WeaponManager {
         aim + t * (cone ? spread : spread * (n - 1)) + jitter,
         s.speed,
         damage,
-        s.pierce,
+        s.pierce + p.bonusPierce,
         s.range,
       );
     }
@@ -456,7 +617,7 @@ export class WeaponManager {
     const damage = s.damage * p.damageMult;
     const offset = Math.random() * TAU;
     for (let i = 0; i < s.count; i++) {
-      this.projectiles.fireBullet(p.x, p.y, offset + (i / s.count) * TAU, s.speed, damage, s.pierce, s.range);
+      this.projectiles.fireBullet(p.x, p.y, offset + (i / s.count) * TAU, s.speed, damage, s.pierce + p.bonusPierce, s.range);
     }
     return true;
   }

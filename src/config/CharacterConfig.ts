@@ -53,8 +53,8 @@ export const CHARACTER_IDS: CharacterId[] = ['rico', 'dizzy', 'ace', 'jenkins', 
 export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   rico: {
     id: 'rico',
-    name: 'Johnny Rico',
-    role: 'Rifleman / Leader',
+    name: 'Kmac',
+    role: 'Leader / Rifleman',
     bio: 'Frontline veteran whose resilience inspires his squad under relentless swarms.',
     passives: ['+15% squadmate damage', '+10% movement speed'],
     loadoutName: 'Morita Assault Rifle',
@@ -65,11 +65,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   },
   dizzy: {
     id: 'dizzy',
-    name: 'Dizzy Flores',
+    name: 'Chris',
     role: 'Vanguard Striker',
     bio: 'Agile close-quarters specialist who excels in hit-and-run tactics.',
     passives: ['+25% sprint speed', '+1 extra dash dodge'],
-    loadoutName: 'Morita Dual Shotgun',
+    loadoutName: 'Tactical Shotgun',
     startingWeapon: 'dualshotgun',
     perks: perks({ sprintMult: 1.25, extraDashes: 1 }),
     tint: 0xffd2e4,
@@ -77,7 +77,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   },
   ace: {
     id: 'ace',
-    name: 'Ace Levy',
+    name: 'Dee',
     role: 'Heavy Demolitions',
     bio: 'Cocky marksman with a knack for heavy ordinance and explosive payloads.',
     passives: ['+20% explosion AoE radius', 'Explosives cause brief knockback'],
@@ -89,7 +89,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   },
   jenkins: {
     id: 'jenkins',
-    name: 'Carl Jenkins',
+    name: 'Tweez',
     role: 'Telepath / Psionic Scout',
     bio: 'Military Intelligence operative channeling psychic disruption fields.',
     passives: ['+50% XP collection magnet radius', 'Periodically stuns nearby enemies'],
@@ -101,7 +101,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   },
   sugar: {
     id: 'sugar',
-    name: 'Sugar Watkins',
+    name: 'Steve',
     role: 'Roughneck Heavy Gunner',
     bio: "Hardened survivor carrying heavy suppressive firepower into the swarm's core.",
     passives: ['+40% maximum HP', 'Armor reduces incoming damage by 2'],
@@ -121,8 +121,10 @@ export interface GameModeDef {
   durationSec: number;
   /** Multiplies the regular spawn rate (2 = half the spawn interval). */
   spawnRateMult: number;
-  /** Radius of the fixed perimeter in pixels; 0 means an infinite desert. */
+  /** Radius of the fixed perimeter in pixels; 0 means the square perimeter is used. */
   arenaRadius: number;
+  /** Half-width of a square perimeter in pixels (used when arenaRadius is 0). */
+  arenaHalf: number;
   /** Seconds between elite assault waves; 0 disables them. */
   eliteIntervalSec: number;
   /** Minimum chance of a regular spawn being a Tiger Bug once 30 seconds have passed. */
@@ -137,10 +139,11 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     id: 'klendathu',
     name: 'Klendathu Drop',
     tagline: 'CLASSIC SURVIVAL',
-    description: 'Standard 20-minute timed survival across the open desert.',
+    description: 'Standard 20-minute timed survival across a fenced 4000x4000 outpost zone.',
     durationSec: 20 * 60,
     spawnRateMult: 1,
     arenaRadius: 0,
+    arenaHalf: 2000,
     eliteIntervalSec: 0,
     tigerBias: 0,
     accent: 0x6dff7a,
@@ -153,6 +156,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     durationSec: 12 * 60,
     spawnRateMult: 2,
     arenaRadius: 950,
+    arenaHalf: 0,
     eliteIntervalSec: 0,
     tigerBias: 0,
     accent: 0xffa23a,
@@ -165,6 +169,7 @@ export const GAME_MODES: Record<GameModeId, GameModeDef> = {
     durationSec: 18 * 60,
     spawnRateMult: 1,
     arenaRadius: 0,
+    arenaHalf: 2000,
     eliteIntervalSec: 180,
     tigerBias: 0.2,
     accent: 0xff4d3a,
@@ -249,6 +254,7 @@ export interface RunSetup {
   mode: GameModeId;
   character: CharacterId;
   difficulty: DifficultyId;
+  weapon: WeaponId;
 }
 
-export const DEFAULT_RUN: Readonly<RunSetup> = { mode: 'klendathu', character: 'rico', difficulty: 'normal' };
+export const DEFAULT_RUN: Readonly<RunSetup> = { mode: 'klendathu', character: 'rico', difficulty: 'normal', weapon: 'morita' };

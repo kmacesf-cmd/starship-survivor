@@ -15,3 +15,4 @@ export interface CombatHooks {
 
 export const COLOR_NAPALM = 0xff9a3a;
 export const COLOR_LASER = 0x7dffea;
+export const COLOR_CRYO = 0x9fe8ff;
